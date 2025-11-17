@@ -46,7 +46,9 @@ function sendAction(action) {
     
     chrome.tabs.sendMessage(tabs[0].id, { action }, (response) => {
       if (chrome.runtime.lastError) {
-        console.error('Message error:', chrome.runtime.lastError);
+        // Silently ignore - content script will handle the action
+        // Error is expected when message is sent but no response needed
+        return;
       }
     });
   });
@@ -79,8 +81,10 @@ function cancelCurrentOperation() {
     
     chrome.tabs.sendMessage(tabs[0].id, { action: 'cancelOperation' }, (response) => {
       if (chrome.runtime.lastError) {
-        console.error('Message error:', chrome.runtime.lastError);
-      } else {
+        // Silently ignore - operation may have already completed
+        return;
+      }
+      if (response && response.success) {
         document.getElementById('cancelOperation').style.display = 'none';
         chrome.storage.local.set({ activeOperation: false });
       }
