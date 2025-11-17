@@ -43,6 +43,8 @@ The extension will automatically scroll and load all favorites before processing
 **Video Tools:**
 - **Upscale Videos to HD** - ⚠️ *Work in Progress* - Attempts to upscale standard videos to HD quality (may take ~30 seconds per video)
 
+<img width="405" height="253" alt="Screenshot 2025-11-17 at 11 38 04 AM" src="https://github.com/user-attachments/assets/f32d2142-9bb5-46ee-ae6c-801c98d4996f" />
+
 **Manage:**
 - **Unfavorite (Images & Videos)** - Removes favorites that have both image and video formats
 - **Unfavorite (Images Only)** - Removes favorites that only have images (no video)
