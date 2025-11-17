@@ -17,15 +17,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('saveBoth').addEventListener('click', () => sendAction('saveBoth'));
   
   // Manage actions
-  document.getElementById('unsaveBoth').addEventListener('click', () => sendAction('unsaveBoth'));
-  
-  // Utility actions
+document.getElementById('unsaveBoth').addEventListener('click', () => sendAction('unsaveBoth'));
+document.getElementById('unsaveImages').addEventListener('click', () => sendAction('unsaveImages'));
+document.getElementById('unsaveVideos').addEventListener('click', () => sendAction('unsaveVideos'));  // Utility actions
   document.getElementById('viewDownloads').addEventListener('click', openDownloadsPage);
   document.getElementById('downloadSettings').addEventListener('click', openDownloadSettings);
+  document.getElementById('cancelOperation').addEventListener('click', cancelCurrentOperation);
   
   // Start progress tracking
   setInterval(updateProgress, UPDATE_INTERVAL);
   updateProgress();
+  
+  // Check for active operations
+  checkActiveOperation();
 });
 
 /**
@@ -60,6 +64,53 @@ function openDownloadsPage() {
  */
 function openDownloadSettings() {
   chrome.tabs.create({ url: 'chrome://settings/downloads' });
+}
+
+/**
+ * Cancels the current operation running in the content script
+ */
+function cancelCurrentOperation() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs || tabs.length === 0) {
+      console.error('No active tab found');
+      return;
+    }
+    
+    chrome.tabs.sendMessage(tabs[0].id, { action: 'cancelOperation' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('Message error:', chrome.runtime.lastError);
+      } else {
+        document.getElementById('cancelOperation').style.display = 'none';
+        chrome.storage.local.set({ activeOperation: false });
+      }
+    });
+  });
+}
+
+/**
+ * Checks if there's an active operation and shows/hides cancel button
+ */
+function checkActiveOperation() {
+  chrome.storage.local.get(['activeOperation'], (result) => {
+    const cancelBtn = document.getElementById('cancelOperation');
+    if (result.activeOperation) {
+      cancelBtn.style.display = 'block';
+    } else {
+      cancelBtn.style.display = 'none';
+    }
+  });
+  
+  // Check periodically
+  setInterval(() => {
+    chrome.storage.local.get(['activeOperation'], (result) => {
+      const cancelBtn = document.getElementById('cancelOperation');
+      if (result.activeOperation) {
+        cancelBtn.style.display = 'block';
+      } else {
+        cancelBtn.style.display = 'none';
+      }
+    });
+  }, 1000);
 }
 
 /**

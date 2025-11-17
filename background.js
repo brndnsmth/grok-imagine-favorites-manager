@@ -5,7 +5,7 @@
 
 // Constants
 const DOWNLOAD_CONFIG = {
-  RATE_LIMIT_MS: 1000, // 1 second between downloads
+  RATE_LIMIT_MS: 300, // ~3 downloads per second
   FOLDER: 'grok-imagine'
 };
 

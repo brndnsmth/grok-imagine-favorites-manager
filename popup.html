@@ -153,17 +153,20 @@
     <button id="saveBoth" class="primary">Download All Media</button>
     <button id="saveImages">Download Images Only</button>
     <button id="saveVideos">Download Videos Only</button>
-    <div class="rate-limit-notice">Downloads are rate-limited to 1 per second</div>
+    <div class="rate-limit-notice">Downloads are rate-limited to ~3 per second</div>
   </div>
   
   <div class="section">
     <div class="section-title">Manage</div>
-    <button id="unsaveBoth" class="danger">Unfavorite (Items with Images & Videos)</button>
+    <button id="unsaveBoth" class="danger">Unfavorite (Images & Videos)</button>
+    <button id="unsaveImages" class="danger">Unfavorite (Images Only)</button>
+    <button id="unsaveVideos" class="danger">Unfavorite (Videos Only)</button>
   </div>
   
   <div class="section">
     <button id="viewDownloads">Open Downloads Folder</button>
     <button id="downloadSettings">Open Download Settings</button>
+    <button id="cancelOperation" class="danger" style="display: none;">Cancel Current Operation</button>
   </div>
   
   <div id="progress">

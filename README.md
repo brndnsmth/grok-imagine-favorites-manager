@@ -6,9 +6,12 @@ A modern Chrome extension to download and manage your favorited Grok Imagine ima
 
 ## Features
 
-- Download all images and/or videos from your favorites
-- Unfavorite items with both images and videos
+- Download all images and/or videos from your favorites with automatic scrolling
+- Unfavorite items selectively (videos, images, or both)
 - Automatic filename matching (videos use image names)
+- On-screen progress modal with live updates
+- Cancel operations at any time
+- API-based unfavoriting for reliability
 
 ## Installation
 
@@ -20,10 +23,12 @@ A modern Chrome extension to download and manage your favorited Grok Imagine ima
 
 ## Usage
 
-1. Navigate to https://grok.com/imagine/favorites
-2. Log in and scroll to load all your favorites
+1. Log in to your account
+2. Navigate to https://grok.com/imagine/favorites
 3. Click the extension icon
 4. Choose your desired action
+
+The extension will automatically scroll and load all favorites before processing.
 
 ### Available Actions
 
@@ -33,14 +38,21 @@ A modern Chrome extension to download and manage your favorited Grok Imagine ima
 - **Download Videos Only** - Downloads only videos (named to match images)
 
 **Manage:**
-- **Unfavorite (Items with Images & Videos)** - Removes favorites that have both image and video formats
+- **Unfavorite (Images & Videos)** - Removes favorites that have both image and video formats
+- **Unfavorite (Images Only)** - Removes favorites that only have images (no video)
+- **Unfavorite (Videos Only)** - Removes all favorites that have videos (with or without images)
+
+**Utilities:**
+- **Cancel Current Operation** - Stops any running download or unfavorite operation
+- **Open Downloads Folder** - Opens Chrome downloads page
+- **Open Download Settings** - Opens Chrome download settings
 
 ## Files
 
 - `manifest.json` - Extension configuration
 - `popup.html` - Extension popup UI
 - `popup.js` - Popup logic and event handlers
-- `content.js` - Page interaction and media extraction
+- `content.js` - Page interaction, media extraction, and unfavorite operations
 - `background.js` - Download management and rate limiting
 
 ## Downloads Location
@@ -51,19 +63,30 @@ Videos are automatically named to match their corresponding image files (using t
 
 ## Technical Details
 
-- Downloads are rate-limited to 1 per second to avoid issues
-- Unfavorite actions are staggered at 300ms intervals
-- Progress tracking updates in real-time via Chrome storage API
-- Content script runs on all /imagine/* pages
+- Downloads are rate-limited to approximately 3 per second to avoid browser issues
+- Unfavorite requests are delayed by 150ms between calls
+- Progress tracking displays in an on-screen modal with visual progress bar
+- Content script automatically scrolls to load all lazy-loaded content
+- Virtual scrolling is handled by collecting items during scroll process
+- Operations support cancellation at any point
 
 ## Important Notes
 
-- The extension only works on https://grok.com/imagine/favorites
-- Make sure to scroll down to load all favorites before downloading
+- The extension works on https://grok.com/imagine/favorites
+- No manual scrolling needed - the extension handles it automatically
 - Video filenames automatically match their corresponding image names for easy pairing
-- Keep the tab open while unfavoriting to allow all actions to complete
-- **Only items with BOTH images and videos can be unfavorited** (image-only items don't have unfavorite buttons on Grok's main favorites page)
-- Check browser console (F12) for detailed logs during unfavorite operations
+- Keep the tab open while operations run to ensure completion
+- Progress is shown in an on-screen modal with cancellation option
+- Unfavorite operations work by calling `/rest/media/post/unlike` with the post id
+- Check browser console (F12) for detailed logs during operations
+
+## Progress Tracking
+
+The extension shows a gradient progress modal on the page with:
+- Operation name and current status
+- Visual progress bar
+- Real-time count of processed items
+- Cancel button to stop the operation
 
 ## Support
 

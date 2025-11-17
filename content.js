@@ -7,7 +7,7 @@
 const SELECTORS = {
   CARD: '[role="listitem"] .relative.group\\/media-post-masonry-card',
   IMAGE: 'img[alt*="Generated"]',
-  VIDEO: 'video[src]',
+  VIDEO: 'video[src*="generated_video"]',
   UNSAVE_BUTTON: 'button[aria-label="Unsave"]',
   LIST_ITEM: '[role="listitem"]'
 };
@@ -17,7 +17,191 @@ const URL_PATTERNS = {
 };
 
 const TIMING = {
-  NAVIGATION_DELAY: 500
+  NAVIGATION_DELAY: 500,
+  UNFAVORITE_DELAY: 150, // Reduced since we're using API calls
+  POST_LOAD_DELAY: 1000,
+  POST_UNFAVORITE_DELAY: 1000
+};
+
+const API = {
+  UNLIKE_ENDPOINT: 'https://grok.com/rest/media/post/unlike'
+};
+
+/**
+ * Makes an API call to unlike/unfavorite a post
+ * @param {string} postId - The post ID to unlike
+ * @returns {Promise<boolean>} - True if successful
+ */
+async function unlikePost(postId) {
+  try {
+    const response = await fetch(API.UNLIKE_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': '*/*',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ id: postId })
+    });
+    
+    return response.ok;
+  } catch (error) {
+    console.error(`Failed to unlike post ${postId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Progress modal manager
+ */
+const ProgressModal = {
+  modal: null,
+  cancelled: false,
+  
+  create() {
+    if (this.modal) return;
+    
+    this.modal = document.createElement('div');
+    this.modal.id = 'grok-favorites-progress-modal';
+    this.modal.innerHTML = `
+      <div style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(4px);
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      ">
+        <div style="
+          background: #1a1a1a;
+          border: 1px solid #2a2a2a;
+          border-radius: 16px;
+          padding: 32px;
+          min-width: 400px;
+          max-width: 500px;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        ">
+          <div style="
+            font-size: 20px;
+            font-weight: 600;
+            color: #e5e5e5;
+            margin-bottom: 8px;
+          " id="grok-progress-title">Processing...</div>
+          
+          <div style="
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 20px;
+          " id="grok-progress-subtitle">Please wait</div>
+          
+          <div style="
+            background: #0a0a0a;
+            border-radius: 8px;
+            height: 8px;
+            overflow: hidden;
+            margin-bottom: 16px;
+          ">
+            <div style="
+              background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+              height: 100%;
+              width: 0%;
+              transition: width 0.3s ease;
+              border-radius: 8px;
+            " id="grok-progress-bar"></div>
+          </div>
+          
+          <div style="
+            font-size: 13px;
+            color: #a0a0a0;
+            line-height: 1.6;
+            margin-bottom: 16px;
+          " id="grok-progress-details">Starting...</div>
+          
+          <button id="grok-cancel-button" style="
+            width: 100%;
+            padding: 10px 16px;
+            background: #2a1a1a;
+            border: 1px solid #4a2a2a;
+            border-radius: 8px;
+            color: #ff6b6b;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-family: inherit;
+          " onmouseover="this.style.background='#3a1a1a'; this.style.borderColor='#5a2a2a'" onmouseout="this.style.background='#2a1a1a'; this.style.borderColor='#4a2a2a'">
+            Cancel Operation
+          </button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(this.modal);
+    
+    // Add cancel button event listener
+    document.getElementById('grok-cancel-button').addEventListener('click', () => {
+      this.cancel();
+    });
+  },
+  
+  show(title, subtitle = '') {
+    this.cancelled = false;
+    this.create();
+    this.modal.style.display = 'flex';
+    document.getElementById('grok-progress-title').textContent = title;
+    document.getElementById('grok-progress-subtitle').textContent = subtitle;
+    document.getElementById('grok-progress-bar').style.width = '0%';
+    document.getElementById('grok-progress-details').textContent = 'Starting...';
+    
+    // Reset cancel button state
+    const cancelBtn = document.getElementById('grok-cancel-button');
+    cancelBtn.style.display = 'block';
+    cancelBtn.textContent = 'Cancel Operation';
+    cancelBtn.disabled = false;
+    cancelBtn.style.opacity = '1';
+    cancelBtn.style.cursor = 'pointer';
+  },
+  
+  update(progress, details) {
+    if (!this.modal) return;
+    const percentage = Math.min(100, Math.max(0, progress));
+    document.getElementById('grok-progress-bar').style.width = `${percentage}%`;
+    document.getElementById('grok-progress-details').textContent = details;
+  },
+  
+  cancel() {
+    this.cancelled = true;
+    this.update(0, 'Cancelling operation...');
+    document.getElementById('grok-cancel-button').textContent = 'Cancelling...';
+    document.getElementById('grok-cancel-button').disabled = true;
+    document.getElementById('grok-cancel-button').style.opacity = '0.5';
+    document.getElementById('grok-cancel-button').style.cursor = 'not-allowed';
+  },
+  
+  isCancelled() {
+    return this.cancelled;
+  },
+  
+  hide() {
+    if (this.modal) {
+      this.modal.style.display = 'none';
+    }
+    this.cancelled = false;
+  },
+  
+  remove() {
+    if (this.modal) {
+      this.modal.remove();
+      this.modal = null;
+    }
+    this.cancelled = false;
+  }
 };
 
 /**
@@ -26,8 +210,18 @@ const TIMING = {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   const { action } = request;
   
+  if (action === 'cancelOperation') {
+    ProgressModal.cancel();
+    chrome.storage.local.set({ activeOperation: false });
+    sendResponse({ success: true });
+    return;
+  }
+  
   (async () => {
     try {
+      // Mark operation as active
+      chrome.storage.local.set({ activeOperation: true });
+      
       if (action.startsWith('save')) {
         await handleSave(action);
       } else if (action.startsWith('unsave')) {
@@ -35,7 +229,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     } catch (error) {
       console.error('Error handling action:', error);
-      alert(`Error: ${error.message}`);
+      ProgressModal.hide();
+      
+      // Only show alert if not cancelled
+      if (!error.message.includes('cancelled')) {
+        alert(`Error: ${error.message}`);
+      }
+    } finally {
+      // Mark operation as inactive
+      chrome.storage.local.set({ activeOperation: false });
     }
   })();
 });
@@ -161,12 +363,207 @@ function checkVideoExists(url) {
 }
 
 /**
+ * Scrolls and collects all post IDs from the page
+ * @param {Function} filterFn - Function to filter items (receives hasVideo, hasImage)
+ * @returns {Promise<Array<string>>} Array of post IDs
+ */
+async function scrollAndCollectPostIds(filterFn) {
+  console.log('Starting scroll to collect post IDs...');
+  
+  // Find the scrollable container
+  let scrollContainer = document.documentElement;
+  const possibleContainers = [
+    document.querySelector('main'),
+    document.querySelector('[role="main"]'),
+    document.querySelector('.overflow-y-auto'),
+    document.querySelector('.overflow-auto'),
+    ...Array.from(document.querySelectorAll('div')).filter(el => {
+      const style = window.getComputedStyle(el);
+      return style.overflowY === 'auto' || style.overflowY === 'scroll';
+    })
+  ].filter(el => el !== null);
+  
+  if (possibleContainers.length > 0) {
+    scrollContainer = possibleContainers.reduce((tallest, current) => {
+      return current.scrollHeight > tallest.scrollHeight ? current : tallest;
+    });
+    console.log('Found custom scroll container:', scrollContainer);
+  }
+  
+  const seenPostIds = new Set();
+  let lastCardCount = 0;
+  let unchangedCount = 0;
+  const maxUnchangedAttempts = 5;
+  
+  // Get viewport height for relative scrolling
+  const viewportHeight = window.innerHeight;
+  console.log(`Viewport height: ${viewportHeight}px`);
+  
+  while (unchangedCount < maxUnchangedAttempts) {
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log('Collection cancelled by user');
+      throw new Error('Operation cancelled by user');
+    }
+    
+    // Collect post IDs from currently visible items
+    const items = document.querySelectorAll(SELECTORS.LIST_ITEM);
+    items.forEach((item) => {
+      const hasVideo = item.querySelector(SELECTORS.VIDEO);
+      const hasImage = item.querySelector(SELECTORS.IMAGE);
+      
+      // Apply filter function
+      if (filterFn(hasVideo, hasImage)) {
+        const img = item.querySelector(SELECTORS.IMAGE);
+        if (img && img.src) {
+          const match = img.src.match(/images\/([a-f0-9-]+)\./i);
+          if (match && match[1]) {
+            seenPostIds.add(match[1]);
+          }
+        }
+      }
+    });
+    
+    const currentCardCount = items.length;
+    console.log(`Current cards: ${currentCardCount}, Collected IDs: ${seenPostIds.size}, Last: ${lastCardCount}`);
+    
+    const scrollProgress = Math.min(80, (unchangedCount / maxUnchangedAttempts) * 80);
+    ProgressModal.update(scrollProgress, `Collecting items... Found ${seenPostIds.size} so far`);
+    
+    if (currentCardCount === lastCardCount) {
+      unchangedCount++;
+      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+    } else {
+      unchangedCount = 0;
+      lastCardCount = currentCardCount;
+      console.log(`New cards found! Total collected: ${seenPostIds.size}`);
+    }
+    
+    // Scroll down by viewport height
+    const currentScroll = scrollContainer.scrollTop;
+    const newScroll = currentScroll + viewportHeight;
+    scrollContainer.scrollTop = newScroll;
+    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    
+    // Wait for content to load
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  
+  // Scroll back to top
+  console.log('Scrolling back to top');
+  ProgressModal.update(90, 'Scrolling back to top...');
+  scrollContainer.scrollTop = 0;
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  const postIds = Array.from(seenPostIds);
+  console.log(`Finished! Total post IDs collected: ${postIds.length}`);
+  return postIds;
+}
+
+/**
+ * Scrolls down the page to load all lazy-loaded content
+ * @returns {Promise<void>}
+ */
+async function scrollToLoadAll() {
+  console.log('Starting scroll to load all content...');
+  
+  ProgressModal.update(0, 'Finding scrollable container...');
+  
+  // Find the scrollable container
+  let scrollContainer = document.documentElement;
+  const possibleContainers = [
+    document.querySelector('main'),
+    document.querySelector('[role="main"]'),
+    document.querySelector('.overflow-y-auto'),
+    document.querySelector('.overflow-auto'),
+    ...Array.from(document.querySelectorAll('div')).filter(el => {
+      const style = window.getComputedStyle(el);
+      return style.overflowY === 'auto' || style.overflowY === 'scroll';
+    })
+  ].filter(el => el !== null);
+  
+  if (possibleContainers.length > 0) {
+    scrollContainer = possibleContainers.reduce((tallest, current) => {
+      return current.scrollHeight > tallest.scrollHeight ? current : tallest;
+    });
+    console.log('Found custom scroll container:', scrollContainer);
+  }
+  
+  let lastCardCount = 0;
+  let unchangedCount = 0;
+  const maxUnchangedAttempts = 5;
+  const seenCards = new Set();
+  
+  // Get viewport height for relative scrolling
+  const viewportHeight = window.innerHeight;
+  console.log(`Viewport height: ${viewportHeight}px`);
+  
+  while (unchangedCount < maxUnchangedAttempts) {
+    // Track unique cards (use image src as identifier to handle virtual scrolling)
+    const cards = document.querySelectorAll(SELECTORS.CARD);
+    cards.forEach(card => {
+      const img = card.querySelector(SELECTORS.IMAGE);
+      if (img && img.src) {
+        seenCards.add(img.src);
+      }
+    });
+    
+    const currentCardCount = cards.length;
+    const totalUnique = seenCards.size;
+    console.log(`Current cards in DOM: ${currentCardCount}, Total unique seen: ${totalUnique}, Last: ${lastCardCount}`);
+    
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log('Scroll loading cancelled by user');
+      throw new Error('Operation cancelled by user');
+    }
+    
+    const scrollProgress = Math.min(80, (unchangedCount / maxUnchangedAttempts) * 80);
+    ProgressModal.update(scrollProgress, `Loading favorites... Found ${totalUnique} items so far`);
+    
+    if (currentCardCount === lastCardCount) {
+      unchangedCount++;
+      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+    } else {
+      unchangedCount = 0;
+      lastCardCount = currentCardCount;
+      console.log(`New cards found! Total unique: ${totalUnique}`);
+    }
+    
+    // Scroll down by viewport height
+    const currentScroll = scrollContainer.scrollTop;
+    const newScroll = currentScroll + viewportHeight;
+    scrollContainer.scrollTop = newScroll;
+    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    
+    // Wait for content to load
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  
+  // Scroll back to top
+  console.log('Scrolling back to top');
+  ProgressModal.update(90, 'Scrolling back to top...');
+  scrollContainer.scrollTop = 0;
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  const finalCount = seenCards.size;
+  console.log(`Finished! Total unique items loaded: ${finalCount}`);
+  ProgressModal.update(100, `Loaded ${finalCount} total items`);
+}
+
+/**
  * Scrolls down the page to load all lazy-loaded content and collects media
  * @param {string} type - Type of download (saveImages, saveVideos, saveBoth)
  * @returns {Promise<Array>} Array of media items
  */
 async function scrollAndCollectMedia(type) {
   console.log('Starting scroll to load and collect all content...');
+  
+  // Check for cancellation at start
+  if (ProgressModal.isCancelled()) {
+    console.log('Scroll and collect cancelled by user');
+    throw new Error('Operation cancelled by user');
+  }
   
   // Find the scrollable container
   let scrollContainer = document.documentElement;
@@ -199,11 +596,21 @@ async function scrollAndCollectMedia(type) {
   console.log(`Viewport height: ${viewportHeight}px`);
   
   while (unchangedCount < maxUnchangedAttempts) {
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log('Scroll and collect cancelled by user');
+      throw new Error('Operation cancelled by user');
+    }
+    
     // Collect media from currently visible cards
     await collectMediaFromVisibleCards(type, media, seen);
     
     const currentCardCount = document.querySelectorAll(SELECTORS.CARD).length;
     console.log(`Current cards: ${currentCardCount}, Collected media: ${media.length}, Last: ${lastCardCount}`);
+    
+    // Update progress with collected media count (more accurate than card count)
+    const scrollProgress = Math.min(80, (unchangedCount / maxUnchangedAttempts) * 80);
+    ProgressModal.update(scrollProgress, `Collecting media... Found ${media.length} items so far`);
     
     if (currentCardCount === lastCardCount) {
       unchangedCount++;
@@ -211,7 +618,7 @@ async function scrollAndCollectMedia(type) {
     } else {
       unchangedCount = 0;
       lastCardCount = currentCardCount;
-      console.log(`New cards found! Total now: ${currentCardCount}`);
+      console.log(`New cards found! Collected: ${media.length}`);
     }
     
     // Scroll down by viewport height
@@ -222,6 +629,12 @@ async function scrollAndCollectMedia(type) {
     
     // Wait for content to load
     await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  
+  // Check for cancellation before final collection
+  if (ProgressModal.isCancelled()) {
+    console.log('Scroll and collect cancelled by user');
+    throw new Error('Operation cancelled by user');
   }
   
   // One final collection pass
@@ -308,15 +721,16 @@ async function handleSave(type) {
     throw new Error('No media cards found. Make sure you are on the favorites page.');
   }
   
-  // Scroll and collect all media
-  alert('Scrolling to load all favorites... Please wait.');
+  // Show progress modal and scroll to collect all media
+  ProgressModal.show('Collecting Favorites', 'Scrolling to load all items...');
   const media = await scrollAndCollectMedia(type);
   
   if (media.length === 0) {
+    ProgressModal.hide();
     throw new Error('No media found matching the selected criteria.');
   }
   
-  alert(`Collected ${media.length} items. Starting downloads...`);
+  ProgressModal.update(100, `Found ${media.length} items to download`);
   
   // Send to background script for download
   chrome.runtime.sendMessage({ 
@@ -324,12 +738,15 @@ async function handleSave(type) {
     media 
   }, (response) => {
     if (chrome.runtime.lastError) {
+      ProgressModal.hide();
       throw new Error(chrome.runtime.lastError.message);
     }
     
     if (response && response.success) {
-      alert(`Started downloading ${media.length} items. Open the extension to view progress.`);
+      ProgressModal.update(100, `Started downloading ${media.length} items. Check extension popup for progress.`);
+      setTimeout(() => ProgressModal.hide(), 2000);
     } else {
+      ProgressModal.hide();
       throw new Error('Failed to start downloads');
     }
   });
@@ -340,45 +757,188 @@ async function handleSave(type) {
  * @param {string} type - Type of unfavorite operation
  */
 function handleUnsave(type) {
-  if (type !== 'unsaveBoth') {
-    return;
+  if (type === 'unsaveBoth') {
+    handleUnsaveBoth();
+  } else if (type === 'unsaveImages') {
+    handleUnsaveImages();
+  } else if (type === 'unsaveVideos') {
+    handleUnsaveVideos();
   }
+}
+
+/**
+ * Handles unfavoriting items with both video and image using API calls
+ */
+async function handleUnsaveBoth() {
+  // Scroll and collect post IDs for items with both video and image
+  ProgressModal.show('Unfavoriting Items', 'Loading all favorites...');
   
-  const items = document.querySelectorAll(SELECTORS.LIST_ITEM);
-  console.log(`Checking ${items.length} items for both video and image`);
-  
-  const buttonsToClick = [];
-  
-  items.forEach((item) => {
-    const hasVideo = item.querySelector(SELECTORS.VIDEO);
-    const hasImage = item.querySelector(SELECTORS.IMAGE);
-    
-    if (hasVideo && hasImage) {
-      const btn = item.querySelector(SELECTORS.UNSAVE_BUTTON);
-      if (btn) {
-        buttonsToClick.push(btn);
-      }
-    }
+  const postIds = await scrollAndCollectPostIds((hasVideo, hasImage) => {
+    return hasVideo && hasImage;
   });
   
-  console.log(`Found ${buttonsToClick.length} items with both video and image`);
+  console.log(`Found ${postIds.length} items with both video and image`);
   
-  if (buttonsToClick.length === 0) {
+  if (postIds.length === 0) {
+    ProgressModal.hide();
     alert('No items found with both video and image.');
     return;
   }
   
-  const estimatedTime = Math.ceil(buttonsToClick.length * TIMING.UNFAVORITE_DELAY / 1000);
-  alert(`Starting to unfavorite ${buttonsToClick.length} items. This will take approximately ${estimatedTime} seconds. Keep this tab open.`);
+  const estimatedTime = Math.ceil(postIds.length * TIMING.UNFAVORITE_DELAY / 1000);
+  ProgressModal.update(0, `Found ${postIds.length} items. Starting unfavorite process (${estimatedTime}s)...`);
   
-  buttonsToClick.forEach((btn, index) => {
-    setTimeout(() => {
-      try {
-        btn.click();
-        console.log(`Unfavorited item ${index + 1} of ${buttonsToClick.length}`);
-      } catch (error) {
-        console.error(`Failed to unfavorite item ${index + 1}:`, error);
+  let successCount = 0;
+  let failCount = 0;
+  
+  for (let i = 0; i < postIds.length; i++) {
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log(`Unfavorite operation cancelled at item ${i + 1}`);
+      ProgressModal.hide();
+      alert(`Operation cancelled. ${successCount} of ${postIds.length} items were unfavorited.`);
+      return;
+    }
+    
+    try {
+      const success = await unlikePost(postIds[i]);
+      if (success) {
+        successCount++;
+        console.log(`Unfavorited item ${i + 1} of ${postIds.length}`);
+      } else {
+        failCount++;
+        console.warn(`Failed to unfavorite item ${i + 1}`);
       }
-    }, index * TIMING.UNFAVORITE_DELAY);
+      
+      const progress = ((i + 1) / postIds.length) * 100;
+      ProgressModal.update(progress, `Unfavorited ${successCount} of ${postIds.length} items`);
+      
+      // Small delay between requests
+      await new Promise(resolve => setTimeout(resolve, TIMING.UNFAVORITE_DELAY));
+    } catch (error) {
+      failCount++;
+      console.error(`Failed to unfavorite item ${i + 1}:`, error);
+    }
+  }
+  
+  ProgressModal.hide();
+  alert(`Finished! Successfully unfavorited ${successCount} items${failCount > 0 ? `, ${failCount} failed` : ''}. Refresh to see changes.`);
+}
+
+/**
+ * Handles unfavoriting single image items using API calls
+ */
+async function handleUnsaveImages() {
+  // Scroll and collect post IDs for image-only items
+  ProgressModal.show('Unfavoriting Single Images', 'Loading all favorites...');
+  
+  const postIds = await scrollAndCollectPostIds((hasVideo, hasImage) => {
+    return !hasVideo && hasImage;
   });
+  
+  console.log(`Found ${postIds.length} items with single images only`);
+  
+  if (postIds.length === 0) {
+    ProgressModal.hide();
+    alert('No single image items found.');
+    return;
+  }
+  
+  const estimatedTime = Math.ceil(postIds.length * TIMING.UNFAVORITE_DELAY / 1000);
+  ProgressModal.update(0, `Found ${postIds.length} items. Starting unfavorite process (${estimatedTime}s)...`);
+  
+  let successCount = 0;
+  let failCount = 0;
+  
+  for (let i = 0; i < postIds.length; i++) {
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log(`Unfavorite operation cancelled at item ${i + 1}`);
+      ProgressModal.hide();
+      alert(`Operation cancelled. ${successCount} of ${postIds.length} items were unfavorited.`);
+      return;
+    }
+    
+    try {
+      const success = await unlikePost(postIds[i]);
+      if (success) {
+        successCount++;
+        console.log(`Unfavorited item ${i + 1} of ${postIds.length}`);
+      } else {
+        failCount++;
+        console.warn(`Failed to unfavorite item ${i + 1}`);
+      }
+      
+      const progress = ((i + 1) / postIds.length) * 100;
+      ProgressModal.update(progress, `Unfavorited ${successCount} of ${postIds.length} items`);
+      
+      // Small delay between requests
+      await new Promise(resolve => setTimeout(resolve, TIMING.UNFAVORITE_DELAY));
+    } catch (error) {
+      failCount++;
+      console.error(`Failed to unfavorite item ${i + 1}:`, error);
+    }
+  }
+  
+  ProgressModal.hide();
+  alert(`Finished! Successfully unfavorited ${successCount} items${failCount > 0 ? `, ${failCount} failed` : ''}. Refresh to see changes.`);
+}
+
+/**
+ * Handles unfavoriting video items using API calls
+ */
+async function handleUnsaveVideos() {
+  // Scroll and collect post IDs for video items (with or without images)
+  ProgressModal.show('Unfavoriting Videos', 'Loading all favorites...');
+  
+  const postIds = await scrollAndCollectPostIds((hasVideo, hasImage) => {
+    return hasVideo; // Any item with a video
+  });
+  
+  console.log(`Found ${postIds.length} items with videos`);
+  
+  if (postIds.length === 0) {
+    ProgressModal.hide();
+    alert('No video items found.');
+    return;
+  }
+  
+  const estimatedTime = Math.ceil(postIds.length * TIMING.UNFAVORITE_DELAY / 1000);
+  ProgressModal.update(0, `Found ${postIds.length} items. Starting unfavorite process (${estimatedTime}s)...`);
+  
+  let successCount = 0;
+  let failCount = 0;
+  
+  for (let i = 0; i < postIds.length; i++) {
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log(`Unfavorite operation cancelled at item ${i + 1}`);
+      ProgressModal.hide();
+      alert(`Operation cancelled. ${successCount} of ${postIds.length} items were unfavorited.`);
+      return;
+    }
+    
+    try {
+      const success = await unlikePost(postIds[i]);
+      if (success) {
+        successCount++;
+        console.log(`Unfavorited item ${i + 1} of ${postIds.length}`);
+      } else {
+        failCount++;
+        console.warn(`Failed to unfavorite item ${i + 1}`);
+      }
+      
+      const progress = ((i + 1) / postIds.length) * 100;
+      ProgressModal.update(progress, `Unfavorited ${successCount} of ${postIds.length} items`);
+      
+      // Small delay between requests
+      await new Promise(resolve => setTimeout(resolve, TIMING.UNFAVORITE_DELAY));
+    } catch (error) {
+      failCount++;
+      console.error(`Failed to unfavorite item ${i + 1}:`, error);
+    }
+  }
+  
+  ProgressModal.hide();
+  alert(`Finished! Successfully unfavorited ${successCount} items${failCount > 0 ? `, ${failCount} failed` : ''}. Refresh to see changes.`);
 }
