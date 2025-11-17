@@ -167,8 +167,21 @@ const ProgressModal = {
             font-size: 13px;
             color: #a0a0a0;
             line-height: 1.6;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
           " id="grok-progress-details">Starting...</div>
+          
+          <div style="
+            font-size: 12px;
+            color: #fbbf24;
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 16px;
+            line-height: 1.4;
+          ">
+            ⚠️ Do not navigate away or close this tab
+          </div>
           
           <button id="grok-cancel-button" style="
             width: 100%;
@@ -463,12 +476,23 @@ async function scrollAndCollectPostIds(filterFn) {
       
       // Apply filter function
       if (filterFn(hasVideo, hasImage)) {
+        let postId = null;
+        
+        // The post ID is always from the image URL, not the video URL
+        // The video ID is just for the generated video asset
         const img = item.querySelector(SELECTORS.IMAGE);
         if (img && img.src) {
-          const match = img.src.match(/images\/([a-f0-9-]+)\./i);
+          // Try to extract UUID from different URL patterns:
+          // Pattern 1: https://imagine-public.x.ai/imagine-public/images/{uuid}.png
+          // Pattern 2: https://assets.grok.com/users/.../{uuid}/content
+          const match = img.src.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
           if (match && match[1]) {
-            seenPostIds.add(match[1]);
+            postId = match[1];
           }
+        }
+        
+        if (postId) {
+          seenPostIds.add(postId);
         }
       }
     });
@@ -979,18 +1003,18 @@ function handleUnsave(type) {
  * Handles unfavoriting items with both video and image using API calls
  */
 async function handleUnsaveBoth() {
-  // Scroll and collect post IDs for items with both video and image
-  ProgressModal.show('Unfavoriting Items', 'Loading all favorites...');
+  // Scroll and collect post IDs for ALL items (images and videos)
+  ProgressModal.show('Unfavoriting All Items', 'Loading all favorites...');
   
   const postIds = await scrollAndCollectPostIds((hasVideo, hasImage) => {
-    return hasVideo && hasImage;
+    return hasImage; // Unfavorite all items (all items have images)
   });
   
-  console.log(`Found ${postIds.length} items with both video and image`);
+  console.log(`Found ${postIds.length} items to unfavorite`);
   
   if (postIds.length === 0) {
     ProgressModal.hide();
-    alert('No items found with both video and image.');
+    alert('No items found.');
     return;
   }
   
