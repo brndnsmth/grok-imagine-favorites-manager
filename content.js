@@ -1267,17 +1267,41 @@ async function handleUnsaveAll() {
   
   console.log(`Collected ${allMedia.length} total media files`);
   
-  // Extract unique post IDs (each post has at least an image, maybe a video too)
+  // Extract unique post IDs from IMAGE URLs only (post ID = image UUID, not video UUID)
+  // For older posts, videos have different UUIDs than their images
+  // URL patterns:
+  //   - https://assets.grok.com/users/{userId}/{postId}/content
+  //   - https://assets.grok.com/users/{userId}/generated/{postId}/preview_image.jpg
+  //   - https://imagine-public.x.ai/imagine-public/images/{postId}.png
   const postIdsSet = new Set();
   for (const item of allMedia) {
-    const match = item.url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-    if (match && match[1]) {
-      postIdsSet.add(match[1]);
+    // Only extract UUID from image URLs (skip videos)
+    if (!item.url.includes('generated_video')) {
+      let postId = null;
+      
+      // Try pattern 1 & 2: UUID before /content or /preview_image.jpg
+      let match = item.url.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(content|preview_image\.jpg)/i);
+      if (match && match[1]) {
+        postId = match[1];
+      } else {
+        // Try pattern 3: UUID in /images/{uuid}.png
+        match = item.url.match(/\/images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(png|jpg|jpeg)/i);
+        if (match && match[1]) {
+          postId = match[1];
+        }
+      }
+      
+      if (postId) {
+        console.log(`Found image URL: ${item.url} -> Post ID: ${postId}`);
+        postIdsSet.add(postId);
+      } else {
+        console.log(`Image URL but couldn't extract post ID: ${item.url}`);
+      }
     }
   }
   
   const postIds = Array.from(postIdsSet);
-  console.log(`Found ${postIds.length} unique posts to unfavorite`);
+  console.log(`Found ${postIds.length} unique posts to unfavorite:`, postIds);
   
   if (postIds.length === 0) {
     ProgressModal.hide();
