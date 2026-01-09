@@ -505,11 +505,12 @@ function isValidUrl(url, patterns) {
 }
 
 /**
- * Checks if a video URL exists using a HEAD request (lightweight)
- * @param {string} url - The video URL to check
+ * Checks if a URL exists using a HEAD request (lightweight)
+ * @param {string} url - The URL to check
  * @returns {Promise<boolean>}
  */
-async function checkVideoExistsHTTP(url) {
+async function checkUrlExists(url) {
+  if (!url) return false;
   try {
     const response = await fetch(url, {
       method: 'HEAD',
@@ -1044,25 +1045,39 @@ async function scrollAndCollectMedia(type) {
         const img = card.querySelector(SELECTORS.IMAGE);
         if (img && img.src) {
           const postIdFromImg = extractPostId(img.src);
+          const originalUrl = img.src.split('?')[0].replace(/\/cdn-cgi\/image\/[^\/]*\//, '/');
           
           // Use the most reliable ID: Card Link ID > Image Src ID > videoId
           const effectivePostId = postId || postIdFromImg || (hasVideoInCard ? videoId : null);
           
-          // Construct HQ URL
-          let imageUrl = img.src.split('?')[0].replace(/\/cdn-cgi\/image\/[^\/]*\//, '/');
+          let imageUrl = originalUrl;
+          let isHQ = false;
+
+          // Attempt HQ URL if we have an ID
           if (effectivePostId) {
-            imageUrl = `https://imagine-public.x.ai/imagine-public/images/${effectivePostId}.jpg?cache=1&dl=1`;
+            const hqCandidate = `https://imagine-public.x.ai/imagine-public/images/${effectivePostId}.jpg?cache=1&dl=1`;
+            // Check if it's a preview for a video (often doesn't have an HQ image counterpart)
+            const isPreview = originalUrl.includes('preview_image') || originalUrl.includes('thumbnail');
+            
+            if (hasVideoInCard && isPreview && (effectivePostId === videoId || !postId)) {
+               console.log('Skipping video preview as redundant:', hqCandidate);
+               imageUrl = null; // Mark as skipped
+            } else {
+               // Dynamic Check for HQ URL
+               console.log(`Checking HQ URL: ${hqCandidate}`);
+               const exists = await checkUrlExists(hqCandidate);
+               if (exists) {
+                 imageUrl = hqCandidate;
+                 isHQ = true;
+               } else {
+                 console.log(`HQ URL 404, SKIPPING this asset (not high quality): ${originalUrl}`);
+                 imageUrl = null; // Skip images that don't have an HQ version
+               }
+            }
           }
 
-          if (isValidUrl(imageUrl, URL_PATTERNS.IMAGE)) {
-            const isPreview = imageUrl.includes('preview_image') || imageUrl.includes('thumbnail');
-            
-            // SKIP condition: 
-            // - If it's a preview AND we already have a video in this card, AND the ID is the same
-            // This prevents downloading a speculative 404 JPG for a video generation.
-            if (hasVideoInCard && isPreview && (effectivePostId === videoId || !postId)) {
-               console.log('Skipping video preview as redundant:', imageUrl);
-            } else if (!allMediaData.has(imageUrl)) {
+          if (imageUrl && isValidUrl(imageUrl, URL_PATTERNS.IMAGE)) {
+            if (!allMediaData.has(imageUrl)) {
               const filename = generateUniqueFilename(imageUrl, effectivePostId, false);
               allMediaData.set(imageUrl, { url: imageUrl, filename, isVideo: false });
             }
