@@ -9,7 +9,7 @@ const SELECTORS = {
   IMAGE: 'img[alt*="Generated"]',
   VIDEO: 'video[src*="generated_video"]',
   VIDEO_INDICATOR: 'svg[data-icon="play"]', // Play button overlay indicates video
-  UNSAVE_BUTTON: 'button[aria-label="Unsave"]',
+  UNSAVE_BUTTON: 'button[aria-label="Unsave"], button[aria-label="保存解除"], button[aria-label*="nsave"], button[aria-label*="解除"], button:has(path[d^="M12.0014 6.339"])',
   LIST_ITEM: '[role="listitem"]'
 };
 
@@ -19,7 +19,7 @@ const URL_PATTERNS = {
 
 const TIMING = {
   NAVIGATION_DELAY: 500,
-  UNFAVORITE_DELAY: 150, // Reduced since we're using API calls
+  UNFAVORITE_DELAY: 200, 
   POST_LOAD_DELAY: 1000,
   POST_UNFAVORITE_DELAY: 1000,
   UPSCALE_TIMEOUT: 30000 // 30 seconds for upscale processing
@@ -47,9 +47,18 @@ async function unlikePost(postId) {
       body: JSON.stringify({ id: postId })
     });
 
+    const dataText = await response.text();
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(dataText);
+    } catch (e) {
+    }
+
+    // Grok unlike API returns {} on success with 200 status
     return response.ok;
   } catch (error) {
-    console.error(`Failed to unlike post ${postId}:`, error);
+    console.error(`--- DEBUG: Failed to unlike post ${postId}:`, error);
     return false;
   }
 }
@@ -379,15 +388,101 @@ function determineFilename(url, fallbackBase = null, isVideo = false) {
  * @param {string} imgSrc
  * @returns {string|null}
  */
-function extractPostId(imgSrc) {
+/**
+ * Extracts all UUID-like strings from an element's attributes
+ * @param {HTMLElement} element - The element to scan
+ * @returns {string[]} - Array of unique UUIDs found
+ */
+/**
+ * Extracts all UUID-like strings from an element's attributes and logs their sources
+ * @param {HTMLElement} element - The element to scan
+ * @param {number} cardIndex - Optional index for logging
+ * @returns {string[]} - Array of unique UUIDs found
+ */
+/**
+ * Extracts potential Post IDs from a card with priority
+ */
+function findAllUUIDsInElement(element, cardIndex = 0) {
+  const uuids = new Set();
+  const listItem = element.closest('[role="listitem"]') || element;
+  const targets = [listItem, ...listItem.querySelectorAll('*')];
+  
+  
+  // High priority list
+  const priorityIds = new Set();
+
+  for (const el of targets) {
+    const tagName = el.tagName.toLowerCase();
+    
+    // 1. Check all links (highest priority for Post IDs)
+    if (tagName === 'a' && el.href) {
+      const pathMatch = el.href.match(/\/(?:post|imagine\/post|status)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+      if (pathMatch) {
+        const id = pathMatch[1].toLowerCase();
+        priorityIds.add(id);
+      }
+    }
+
+    // 2. Scan attributes (Unsave button attributes are high priority)
+    const isUnsaveBtn = (tagName === 'button' && (el.getAttribute('aria-label') === 'Save' || el.getAttribute('aria-label') === 'Unsave' || el.getAttribute('aria-label') === '保存解除'));
+    
+    for (const attr of el.attributes) {
+      const matches = attr.value.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
+      if (matches) {
+        matches.forEach(m => {
+          const val = m.toLowerCase();
+          if (isUnsaveBtn) {
+            priorityIds.add(val);
+          }
+          uuids.add(val);
+        });
+      }
+    }
+
+    // 3. Scan text nodes
+    if (el.children.length === 0 && el.textContent) {
+      const textMatches = el.textContent.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
+      if (textMatches) textMatches.forEach(m => uuids.add(m.toLowerCase()));
+    }
+  }
+
+  // Combine: Priority IDs first, then the rest
+  const finalIds = Array.from(new Set([...Array.from(priorityIds), ...Array.from(uuids)]));
+  return finalIds;
+}
+
+/**
+ * Extracts post ID from URL based on known patterns
+ */
+function extractPostId(url) {
   try {
-    const match = imgSrc.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-    return match ? match[1] : null;
+    if (!url) return null;
+    const matches = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
+    if (!matches) return null;
+
+    // Special case for Grok assets: /users/{userId}/generated/{postId}/
+    const assetMatch = url.match(/\/generated\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (assetMatch) return assetMatch[1].toLowerCase();
+
+    // Default: return the last one
+    return matches[matches.length - 1].toLowerCase();
   } catch (e) {
     return null;
   }
 }
 
+/**
+ * Attempts to extract Post ID from a card element's attributes or links
+ */
+function findPostIdInCard(card) {
+  // 1. Check for all UUIDs anywhere in the card's attributes (Deep Scan)
+  const allIds = findAllUUIDsInElement(card);
+  
+  // 2. Filter out certain IDs if we can identify them (e.g. userId if known)
+  // But for now, returning the most "promising" one.
+  // We'll return the list to handleUnsaveAll to try them.
+  return allIds;
+}
 /**
  * Extracts the base filename without extension from a URL
  * @param {string} url - The image URL
@@ -861,6 +956,31 @@ async function scrollAndCollectVideosForUpscale() {
 }
 
 /**
+ * Finds the most likely scrollable container on the page
+ * @returns {HTMLElement|null} The scrollable container or null if not found
+ */
+function findScrollContainer() {
+  const possibleContainers = [
+    document.querySelector('main'),
+    document.querySelector('[role="main"]'),
+    document.querySelector('.overflow-y-auto'),
+    document.querySelector('.overflow-auto'),
+    ...Array.from(document.querySelectorAll('div')).filter(el => {
+      const style = window.getComputedStyle(el);
+      return (style.overflow === 'auto' || style.overflow === 'scroll' || 
+              style.overflowY === 'auto' || style.overflowY === 'scroll') && 
+              el.scrollHeight > el.clientHeight;
+    })
+  ].filter(el => el !== null);
+
+  if (possibleContainers.length === 0) return null;
+
+  return possibleContainers.reduce((tallest, current) => {
+    return current.scrollHeight > tallest.scrollHeight ? current : tallest;
+  }, possibleContainers[0]);
+}
+
+/**
  * Scrolls down the page to load all lazy-loaded content and collects media
  * @param {string} type - Type of download (saveImages, saveVideos, saveBoth)
  * @returns {Promise<Array>} Array of media items
@@ -875,24 +995,8 @@ async function scrollAndCollectMedia(type) {
   }
 
   // Find the scrollable container
-  let scrollContainer = document.documentElement;
-  const possibleContainers = [
-    document.querySelector('main'),
-    document.querySelector('[role="main"]'),
-    document.querySelector('.overflow-y-auto'),
-    document.querySelector('.overflow-auto'),
-    ...Array.from(document.querySelectorAll('div')).filter(el => {
-      const style = window.getComputedStyle(el);
-      return style.overflowY === 'auto' || style.overflowY === 'scroll';
-    })
-  ].filter(el => el !== null);
-
-  if (possibleContainers.length > 0) {
-    scrollContainer = possibleContainers.reduce((tallest, current) => {
-      return current.scrollHeight > tallest.scrollHeight ? current : tallest;
-    });
-    console.log('Found custom scroll container:', scrollContainer);
-  }
+  const scrollContainer = findScrollContainer() || document.documentElement;
+  console.log('Using scroll container:', scrollContainer);
 
   // First, collect ALL media data while scrolling (don't process yet)
   const allMediaData = new Map(); // Map of url -> { url, filename, isVideo, isHD }
@@ -923,8 +1027,18 @@ async function scrollAndCollectMedia(type) {
     // Collect ALL media from currently visible cards
     const cards = document.querySelectorAll(SELECTORS.CARD);
 
+    let cardIndex = 0;
     for (const card of cards) {
+      cardIndex++;
       let imageName = null;
+      
+      // 1. Deep scan with logging for tracing
+      const allPossibleIds = findAllUUIDsInElement(card, cardIndex);
+
+      // 2. Find the ACTUAL Unsave button element for this specific card
+      const unsaveBtn = card.querySelector(SELECTORS.UNSAVE_BUTTON);
+      if (unsaveBtn) {
+      }
 
       // Extract image
       const img = card.querySelector(SELECTORS.IMAGE);
@@ -937,7 +1051,7 @@ async function scrollAndCollectMedia(type) {
 
           // Store image data
           if (!allMediaData.has(url)) {
-            allMediaData.set(url, { url: url, filename, isVideo: false, isHD: false });
+            allMediaData.set(url, { url: url, filename, isVideo: false, isHD: false, allPossibleIds, buttonElement: unsaveBtn });
           }
         }
       }
@@ -948,11 +1062,11 @@ async function scrollAndCollectMedia(type) {
         const url = video.src.split('?')[0];
 
         if (!allMediaData.has(url)) {
-          const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
           const filename = (imageName && uuidRe.test(imageName)) ? `${imageName}.mp4` : determineFilename(url, imageName || null, true);
 
           // Store video data
-          allMediaData.set(url, { url: video.src, filename, isVideo: true, isHD: false });
+          allMediaData.set(url, { url: video.src, filename, isVideo: true, isHD: false, allPossibleIds, buttonElement: unsaveBtn });
 
           // Also track potential HD version URL
           if (url.includes('generated_video.mp4')) {
@@ -960,7 +1074,7 @@ async function scrollAndCollectMedia(type) {
             const hdFilename = filename.replace(/(\.[^.]+)$/, '-HD$1');
 
             if (!allMediaData.has(hdUrl)) {
-              allMediaData.set(hdUrl, { url: hdUrl, filename: hdFilename, isVideo: true, isHD: true });
+              allMediaData.set(hdUrl, { url: hdUrl, filename: hdFilename, isVideo: true, isHD: true, allPossibleIds, buttonElement: unsaveBtn });
             }
           }
         }
@@ -1257,103 +1371,100 @@ async function handleSave(type) {
 }
 
 /**
- * Handles unfavorite all operation
+ * Handles unfavorite all operation using a "Universal Sweep" approach
+ * It handles both items with and without physical buttons, sequentially.
  */
 async function handleUnsaveAll() {
-  ProgressModal.show('Unfavoriting All Items', 'Collecting all media...');
+  ProgressModal.show('Unfavoriting All Items', 'Starting sweep...');
 
-  // Collect ALL media just like download does
-  const allMedia = await scrollAndCollectMedia('saveBoth');
+  const scrollContainer = findScrollContainer() || window;
+  let totalProcessed = 0;
+  const processedIds = new Set();
 
-  console.log(`Collected ${allMedia.length} total media files`);
+  let unchangedCount = 0;
+  let lastScrollHeight = 0;
 
-  // Extract unique post IDs from IMAGE URLs only (post ID = image UUID, not video UUID)
-  // For older posts, videos have different UUIDs than their images
-  // URL patterns:
-  //   - https://assets.grok.com/users/{userId}/{postId}/content
-  //   - https://assets.grok.com/users/{userId}/generated/{postId}/preview_image.jpg
-  //   - https://imagine-public.x.ai/imagine-public/images/{postId}.png
-  const postIdsSet = new Set();
-  for (const item of allMedia) {
-    // Only extract UUID from image URLs (skip videos)
-    if (!item.url.includes('generated_video')) {
-      let postId = null;
+  while (!ProgressModal.isCancelled()) {
+    // 1. Find all visible cards
+    const cards = document.querySelectorAll(SELECTORS.LIST_ITEM);
+    let actedOnThisTurn = 0;
 
-      // Try pattern 1 & 2: UUID before /content or /preview_image.jpg
-      let match = item.url.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(content|preview_image\.jpg)/i);
-      if (match && match[1]) {
-        postId = match[1];
-      } else {
-        // Try pattern 3: UUID in /images/{uuid}.png
-        match = item.url.match(/\/images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(png|jpg|jpeg)/i);
-        if (match && match[1]) {
-          postId = match[1];
+    for (let i = 0; i < cards.length; i++) {
+      if (ProgressModal.isCancelled()) break;
+      const card = cards[i];
+
+      // Deep scan to find IDs
+      const candidates = findAllUUIDsInElement(card, i + 1);
+      
+      // Filter out candidates we've already processed this session
+      const newPathIds = candidates.filter(id => !processedIds.has(id));
+
+      if (newPathIds.length > 0) {
+        
+        // A. Physical Click (If available)
+        const unsaveBtn = card.querySelector(SELECTORS.UNSAVE_BUTTON);
+        if (unsaveBtn) {
+          try {
+            unsaveBtn.click();
+            // Wait slightly for UI/XHR to trigger
+            await new Promise(resolve => setTimeout(resolve, 300));
+          } catch (e) {
+            console.error(`--- DEBUG:   [CLICK] Failed to click button:`, e);
+          }
         }
-      }
 
-      if (postId) {
-        console.log(`Found image URL: ${item.url} -> Post ID: ${postId}`);
-        postIdsSet.add(postId);
-      } else {
-        console.log(`Image URL but couldn't extract post ID: ${item.url}`);
+        // B. API Execution (Sequential for 100% reliability)
+        for (const id of newPathIds) {
+          processedIds.add(id);
+          try {
+            // WE MUST AWAIT THIS to ensure it completes before moving on
+            await unlikePost(id);
+          } catch (error) {
+            console.error(`--- DEBUG:   [API] Error for ID ${id}:`, error);
+          }
+        }
+
+        actedOnThisTurn++;
+        totalProcessed++;
+
+        // Update progress dynamically based on processed count
+        ProgressModal.update(Math.min(98, totalProcessed * 2), `Unfavorited ${totalProcessed} items (Processing...)`);
+        await new Promise(resolve => setTimeout(resolve, TIMING.UNFAVORITE_DELAY));
       }
     }
-  }
 
-  const postIds = Array.from(postIdsSet);
-  console.log(`Found ${postIds.length} unique posts to unfavorite:`, postIds);
 
-  if (postIds.length === 0) {
-    ProgressModal.hide();
-    const shouldRefresh = confirm('No items found.\n\nClick OK to refresh the page.');
-    if (shouldRefresh) {
-      window.location.reload();
-    }
-    return;
-  }
-
-  const estimatedTime = Math.ceil(postIds.length * TIMING.UNFAVORITE_DELAY / 1000);
-  ProgressModal.update(0, `Found ${postIds.length} items. Starting unfavorite process (${estimatedTime}s)...`);
-
-  let successCount = 0;
-  let failCount = 0;
-
-  for (let i = 0; i < postIds.length; i++) {
-    // Check for cancellation
-    if (ProgressModal.isCancelled()) {
-      console.log(`Unfavorite operation cancelled at item ${i + 1}`);
-      ProgressModal.hide();
-      const shouldRefresh = confirm(`Operation cancelled. ${successCount} of ${postIds.length} items were unfavorited.\n\nClick OK to refresh the page.`);
-      if (shouldRefresh) {
-        window.location.reload();
-      }
-      return;
+    // 2. Scroll to reveal more
+    const currentScrollHeight = (scrollContainer === window) ? document.documentElement.scrollHeight : scrollContainer.scrollHeight;
+    
+    if (currentScrollHeight === lastScrollHeight) {
+      unchangedCount++;
+    } else {
+      unchangedCount = 0;
+      lastScrollHeight = currentScrollHeight;
     }
 
-    try {
-      const success = await unlikePost(postIds[i]);
-      if (success) {
-        successCount++;
-        console.log(`Unfavorited item ${i + 1} of ${postIds.length}`);
-      } else {
-        failCount++;
-        console.warn(`Failed to unfavorite item ${i + 1}`);
-      }
-
-      const progress = ((i + 1) / postIds.length) * 100;
-      ProgressModal.update(progress, `Unfavorited ${successCount} of ${postIds.length} items`);
-
-      // Small delay between requests
-      await new Promise(resolve => setTimeout(resolve, TIMING.UNFAVORITE_DELAY));
-    } catch (error) {
-      failCount++;
-      console.error(`Failed to unfavorite item ${i + 1}:`, error);
+    // Exit condition if everything seems processed and no more scroll
+    if (actedOnThisTurn === 0 && unchangedCount >= 2) {
+      break;
     }
+
+    // Scroll down
+    if (scrollContainer === window) {
+      window.scrollBy(0, window.innerHeight / 2);
+    } else {
+      scrollContainer.scrollTop += scrollContainer.clientHeight / 2;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for render
   }
 
   ProgressModal.hide();
-  const shouldRefresh = confirm(`Finished! Successfully unfavorited ${successCount} items${failCount > 0 ? `, ${failCount} failed` : ''}.\n\nClick OK to refresh the page now (required to see changes and before next operation).`);
-  if (shouldRefresh) {
+  
+  if (totalProcessed === 0) {
+    alert('No items were found to unfavorite. Please ensure the items are visible on screen.');
+  } else {
+    alert(`Finished! ${totalProcessed} items were handled (Physical clicks + Sequential API calls). \n\nThe page will now refresh to show the updated list.`);
     window.location.reload();
   }
 }
