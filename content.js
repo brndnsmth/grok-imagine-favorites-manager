@@ -381,7 +381,7 @@ function determineFilename(url, fallbackBase = null, isVideo = false) {
  */
 function extractPostId(imgSrc) {
   try {
-    const match = imgSrc.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    const match = imgSrc.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
     return match ? match[1] : null;
   } catch (e) {
     return null;
@@ -997,13 +997,15 @@ async function scrollAndCollectMedia(type) {
       if (type === 'saveImages' || type === 'saveBoth') {
         const img = card.querySelector(SELECTORS.IMAGE);
         if (img && img.src) {
-          let imageUrl = img.src.split('?')[0].replace(/\/cdn-cgi\/image\/[^\/]*\//, '/');
-          if (postId) {
-            imageUrl = `https://imagine-public.x.ai/imagine-public/images/${postId}.jpg?cache=1&dl=1`;
-          }
+          const postIdForImg = extractPostId(img.src);
+          const hqUrl = postIdForImg ? `https://imagine-public.x.ai/imagine-public/images/${postIdForImg}.jpg?cache=1&dl=1` : null;
+          const imageUrl = hqUrl || img.src.split('?')[0].replace(/\/cdn-cgi\/image\/[^\/]*\//, '/');
 
-          if (!allMediaData.has(imageUrl)) {
-            const filename = generateUniqueFilename(imageUrl, postId, false);
+          // Filter out previews if we couldn't get a Post ID
+          if (!postId && (imageUrl.includes('preview_image') || imageUrl.includes('thumbnail'))) {
+            console.log('Skipping preview image as no Post ID found:', imageUrl);
+          } else if (!allMediaData.has(imageUrl)) {
+            const filename = generateUniqueFilename(imageUrl, postId || postIdForImg, false);
             allMediaData.set(imageUrl, { url: imageUrl, filename, isVideo: false, isHD: false });
           }
         }
@@ -1012,21 +1014,15 @@ async function scrollAndCollectMedia(type) {
       // 2. Process Video
       if (type === 'saveVideos' || type === 'saveBoth') {
         const video = card.querySelector(SELECTORS.VIDEO);
-        if (video && video.src) {
-          const videoUrl = video.src.split('?')[0];
-          
+        // Prefer a direct download link if available in the card
+        const downloadLink = card.querySelector('a[href*="generated_video"][href*=".mp4"]');
+        const videoSrc = (downloadLink ? downloadLink.href : (video ? video.src : null));
+
+        if (videoSrc) {
+          const videoUrl = videoSrc.split('?')[0];
           if (!allMediaData.has(videoUrl)) {
             const filename = generateUniqueFilename(videoUrl, postId, true);
-            allMediaData.set(videoUrl, { url: videoUrl, filename, isVideo: true, isHD: false });
-
-            // Also check for HD version
-            if (videoUrl.includes('generated_video.mp4')) {
-              const hdUrl = videoUrl.replace('generated_video.mp4', 'generated_video_hd.mp4');
-              const hdFilename = filename.replace(/(\.[^.]+)$/, '-HD$1');
-              if (!allMediaData.has(hdUrl)) {
-                allMediaData.set(hdUrl, { url: hdUrl, filename: hdFilename, isVideo: true, isHD: true });
-              }
-            }
+            allMediaData.set(videoUrl, { url: videoUrl, filename: filename, isVideo: true, isHD: false });
           }
         }
       }
@@ -1062,35 +1058,7 @@ async function scrollAndCollectMedia(type) {
   console.log('Processing collected media...');
   ProgressModal.update(70, 'Processing collected media...');
 
-  const hdVideosToCheck = []; // Collect HD videos to check separately
-
-  for (const [url, data] of allMediaData) {
-    // Handle HD videos separately - queue them for checking
-    if (data.isHD && data.isVideo) {
-      hdVideosToCheck.push({ url, data });
-    }
-  }
-
-  console.log(`Checking ${hdVideosToCheck.length} HD videos...`);
-  let hdCheckedCount = 0;
-
-  for (const { url, data } of hdVideosToCheck) {
-    if (ProgressModal.isCancelled()) {
-      console.log('HD check cancelled by user');
-      throw new Error('Operation cancelled by user');
-    }
-
-    const hdExists = await checkVideoExistsHTTP(url); // Use the faster HTTP check
-    if (hdExists) {
-      if (type === 'saveVideos' || type === 'saveBoth') {
-        allMediaData.set(url, { url, filename: data.filename, isVideo: true });
-      }
-    }
-
-    hdCheckedCount++;
-    const checkProgress = 70 + ((hdCheckedCount / hdVideosToCheck.length) * 15);
-    ProgressModal.update(checkProgress, `Checking HD videos: ${hdCheckedCount}/${hdVideosToCheck.length}`);
-  }
+  // No need to check HD videos separate from collection
 
   // Final Step: Prepare uniquely named media array
   const media = [];
@@ -1248,20 +1216,11 @@ async function handleSave(type) {
 
   ProgressModal.update(100, `Found ${media.length} items to download`);
 
-  // Hide modal and show refresh prompt BEFORE sending download message
-  ProgressModal.hide();
-
-  const shouldRefresh = confirm(`Ready to download ${media.length} items!\n\nDownloads will start after you close this dialog. Check extension popup for progress.\n\nClick OK to refresh the page now, or Cancel to stay (refresh required before next operation).`);
-
   // Send to background script for download
   chrome.runtime.sendMessage({
     action: 'startDownloads',
     media
   });
-
-  if (shouldRefresh) {
-    window.location.reload();
-  }
 }
 
 /**
