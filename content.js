@@ -472,7 +472,15 @@ function simpleHash(str) {
  * @returns {boolean}
  */
 function isValidUrl(url, patterns) {
-  return patterns.some(pattern => url.includes(pattern));
+  if (!url || typeof url !== 'string') return false;
+  // Exclude obviously wrong files like XML
+  if (url.toLowerCase().endsWith('.xml') || url.includes('Error')) return false;
+  
+  const hasValidPattern = patterns.some(pattern => url.includes(pattern));
+  const hasValidExt = /\.(jpg|jpeg|png|webp|mp4|webm)$/i.test(url.split('?')[0]);
+  const isImaginePublic = url.includes('imagine-public.x.ai/imagine-public/images/');
+  
+  return hasValidPattern && (hasValidExt || isImaginePublic);
 }
 
 /**
@@ -1004,7 +1012,7 @@ async function scrollAndCollectMedia(type) {
           // Filter out previews if we couldn't get a Post ID
           if (!postId && (imageUrl.includes('preview_image') || imageUrl.includes('thumbnail'))) {
             console.log('Skipping preview image as no Post ID found:', imageUrl);
-          } else if (!allMediaData.has(imageUrl)) {
+          } else if (!allMediaData.has(imageUrl) && isValidUrl(imageUrl, URL_PATTERNS.IMAGE)) {
             const filename = generateUniqueFilename(imageUrl, postId || postIdForImg, false);
             allMediaData.set(imageUrl, { url: imageUrl, filename, isVideo: false, isHD: false });
           }
@@ -1014,13 +1022,9 @@ async function scrollAndCollectMedia(type) {
       // 2. Process Video
       if (type === 'saveVideos' || type === 'saveBoth') {
         const video = card.querySelector(SELECTORS.VIDEO);
-        // Prefer a direct download link if available in the card
-        const downloadLink = card.querySelector('a[href*="generated_video"][href*=".mp4"]');
-        const videoSrc = (downloadLink ? downloadLink.href : (video ? video.src : null));
-
-        if (videoSrc) {
-          const videoUrl = videoSrc.split('?')[0];
-          if (!allMediaData.has(videoUrl)) {
+        if (video && video.src) {
+          const videoUrl = video.src.split('?')[0];
+          if (!allMediaData.has(videoUrl) && isValidUrl(videoUrl, URL_PATTERNS.IMAGE)) {
             const filename = generateUniqueFilename(videoUrl, postId, true);
             allMediaData.set(videoUrl, { url: videoUrl, filename: filename, isVideo: true, isHD: false });
           }
