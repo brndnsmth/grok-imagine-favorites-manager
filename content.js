@@ -1058,28 +1058,16 @@ async function scrollAndCollectMedia(type) {
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
 
-  // Now filter and process the collected media based on type
+  // Now process the collected media
   console.log('Processing collected media...');
   ProgressModal.update(70, 'Processing collected media...');
 
-  const media = [];
   const hdVideosToCheck = []; // Collect HD videos to check separately
 
   for (const [url, data] of allMediaData) {
     // Handle HD videos separately - queue them for checking
     if (data.isHD && data.isVideo) {
       hdVideosToCheck.push({ url, data });
-      continue;
-    }
-
-    // Filter based on type
-    const shouldInclude =
-      (type === 'saveImages' && !data.isVideo) ||
-      (type === 'saveVideos' && data.isVideo) ||
-      (type === 'saveBoth');
-
-    if (shouldInclude) {
-      media.push({ url: data.url, filename: data.filename });
     }
   }
 
