@@ -1069,9 +1069,14 @@ async function scrollAndCollectMedia(type) {
                if (exists) {
                  imageUrl = hqCandidate;
                  isHQ = true;
+               } else if (!hasVideoInCard) {
+                 // FALLBACK: If it's a standalone image card and HQ failed (or CORS blocked), use original
+                 console.log(`HQ URL 404/Block, falling back to original for standalone image: ${originalUrl}`);
+                 imageUrl = originalUrl;
                } else {
-                 console.log(`HQ URL 404, SKIPPING this asset (not high quality): ${originalUrl}`);
-                 imageUrl = null; // Skip images that don't have an HQ version
+                 // SKIP: If it's a preview for a video card and HQ failed, skip to avoid redundant/404 assets
+                 console.log(`HQ URL 404 for video preview, SKIPPING: ${originalUrl}`);
+                 imageUrl = null;
                }
             }
           }
