@@ -340,41 +340,53 @@ function determineFilename(url, fallbackBase = null, isVideo = false) {
     const parsed = new URL(url);
     const segments = parsed.pathname.split('/').filter(Boolean);
     const last = segments.length ? segments[segments.length - 1] : '';
+    const cleanLast = last.split('?')[0];
 
     // Prefer a UUID-like segment anywhere in the path (common in these assets).
-    // If found, use it as the base name and adopt the last segment's extension if present,
-    // otherwise fall back to a sensible extension (.mp4/.png).
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    
+    let baseName = '';
+    let ext = isVideo ? '.mp4' : '.png';
+
+    // Search for UUID
     for (let i = segments.length - 1; i >= 0; i--) {
-      const seg = segments[i];
+      const seg = segments[i].split('?')[0];
       if (uuidRe.test(seg)) {
-        // determine extension: prefer last segment's extension if any
-        const lastExtMatch = (segments[segments.length - 1] || '').match(/(\.[a-zA-Z0-9]{1,5})$/);
-        const ext = lastExtMatch ? lastExtMatch[1] : (isVideo ? '.mp4' : '.png');
-        return `${seg}${ext}`;
+        if (i === segments.length - 1) {
+          // UUID is the last segment (e.g., imagine-public)
+          baseName = seg;
+          console.log(`[FILENAME] UUID found as last segment: ${baseName}`);
+        } else {
+          // UUID is a parent directory (e.g., assets.grok.com)
+          // Combine UUID with last segment to ensure uniqueness
+          const suffix = cleanLast.replace(/\.[a-zA-Z0-9]{1,5}$/, '');
+          baseName = `${seg}_${suffix}`;
+          console.log(`[FILENAME] UUID parent + suffix: ${baseName}`);
+        }
+        
+        const lastExtMatch = cleanLast.match(/(\.[a-zA-Z0-9]{1,5})$/);
+        ext = lastExtMatch ? lastExtMatch[1] : ext;
+        const result = `${baseName}${ext}`;
+        console.log(`[FILENAME] Final (UUID-based): ${result} for ${url}`);
+        return result;
       }
     }
 
-    // If no UUID found, but last segment contains an extension, return it directly
-    if (/\.[a-zA-Z0-9]{1,5}$/.test(last)) {
-      return last;
+    // Fallback logic
+    if (/\.[a-zA-Z0-9]{1,5}$/.test(cleanLast)) {
+      console.log(`[FILENAME] No UUID, using last segment: ${cleanLast}`);
+      return cleanLast;
     }
 
-    // Use fallbackBase if provided
     if (fallbackBase) {
-      const ext = isVideo ? '.mp4' : '.png';
-      return `${fallbackBase}${ext}`;
+      const result = `${fallbackBase}${ext}`;
+      console.log(`[FILENAME] Using fallbackBase: ${result}`);
+      return result;
     }
 
-    // If last is not just 'content', use it (append extension)
-    if (last && last.toLowerCase() !== 'content') {
-      const ext = isVideo ? '.mp4' : '.png';
-      return `${last}${ext}`;
-    }
-
-    // Last resort: timestamped filename
-    const ext = isVideo ? '.mp4' : '.png';
-    return `${isVideo ? 'video' : 'image'}_${Date.now()}${ext}`;
+    const lastResort = `${isVideo ? 'video' : 'image'}_${Date.now()}${ext}`;
+    console.log(`[FILENAME] Last resort: ${lastResort}`);
+    return lastResort;
   } catch (e) {
     const ext = isVideo ? '.mp4' : '.png';
     return `${isVideo ? 'video' : 'image'}_${Date.now()}${ext}`;
@@ -1009,16 +1021,27 @@ async function scrollAndCollectMedia(type) {
       // 1. Process Video (Do this first to identify video-only/video-dominant cards)
       let hasVideoInCard = false;
       let videoId = null;
+      // 1. Process Video
       if (type === 'saveVideos' || type === 'saveBoth') {
         const video = card.querySelector(SELECTORS.VIDEO);
-        if (video && video.src) {
+        const hasVideo = !!(video && video.src);
+        if (hasVideo) {
           hasVideoInCard = true;
-          const videoUrl = video.src.split('?')[0];
-          videoId = extractPostId(videoUrl);
+          const videoUrl = video.src;
+          videoId = extractVideoId(videoUrl);
           
-          if (!allMediaData.has(videoUrl) && isValidUrl(videoUrl, URL_PATTERNS.IMAGE)) {
-            const filename = generateUniqueFilename(videoUrl, postId || videoId, true);
-            allMediaData.set(videoUrl, { url: videoUrl, filename: filename, isVideo: true });
+          console.log(`[DEBUG] Video found in card:`, {
+            videoId,
+            videoUrl,
+            cardPostId: postId
+          });
+
+          if (isValidUrl(videoUrl, [])) { // Video matches assets.grok.com via isValidUrl inner logic
+            if (!allMediaData.has(videoUrl)) {
+              const filename = generateUniqueFilename(videoUrl, postId || videoId, true);
+              allMediaData.set(videoUrl, { url: videoUrl, filename, isVideo: true });
+              console.log(`[DEBUG] Collected video: ${videoUrl}`);
+            }
           }
         }
       }
@@ -1026,34 +1049,52 @@ async function scrollAndCollectMedia(type) {
       // 2. Process Image
       if (type === 'saveImages' || type === 'saveBoth') {
         const img = card.querySelector(SELECTORS.IMAGE);
+        console.log(`[DEBUG] Image element search:`, img ? 'Found' : 'Not Found');
+        
         if (img && img.src) {
           const originalUrl = img.src.split('?')[0].replace(/\/cdn-cgi\/image\/[^\/]*\//, '/');
+          const assetIdFromImg = extractPostId(originalUrl);
           
-          // Use Case 1: Real Generative Image + (Optional) Video
-          // The Post ID (from card link) is the most reliable key for the High-Quality bucket for images.
-          const effectivePostId = postId || extractPostId(originalUrl);
+          console.log(`[DEBUG] Image processing:`, {
+            originalUrl,
+            assetIdFromImg,
+            cardPostId: postId,
+            hasVideoInCard,
+            videoId
+          });
           
           let imageUrl = originalUrl;
-          if (effectivePostId) {
-            const isPreview = originalUrl.includes('preview_image') || originalUrl.includes('thumbnail');
+          const isPreview = originalUrl.includes('preview_image') || originalUrl.includes('thumbnail');
+          
+          // CRITICAL DECISION LOGIC
+          if (assetIdFromImg) {
+            // Determine which ID to use for the HQ bucket
+            // In mixed media, often the image assetId is what's valid at imagine-public
+            const hqUrl = `https://imagine-public.x.ai/imagine-public/images/${assetIdFromImg}.jpg?cache=1&dl=1`;
             
-            // CRITICAL: Skip if it's just a cover for a video and not a standalone image gem
             if (hasVideoInCard && isPreview) {
-               console.log('Skipping video preview image to prevent 404:', originalUrl);
+               console.log(`[DEBUG] Skipping suspected video thumbnail: ${originalUrl}`);
                imageUrl = null;
             } else {
-               // Use Post ID for high-quality. Historically, imagine-public.x.ai works with the Post ID.
-               imageUrl = `https://imagine-public.x.ai/imagine-public/images/${effectivePostId}.jpg?cache=1&dl=1`;
+               imageUrl = hqUrl;
+               console.log(`[DEBUG] Target set to High-Quality Image: ${imageUrl}`);
             }
+          } else {
+            console.log(`[DEBUG] No UUID in image src. Found image is likely UI/preview only: ${originalUrl}`);
+            imageUrl = null;
           }
 
           if (imageUrl && isValidUrl(imageUrl, URL_PATTERNS.IMAGE)) {
             if (!allMediaData.has(imageUrl)) {
-              // We use effectivePostId for name context
-              const filename = generateUniqueFilename(imageUrl, effectivePostId, false);
+              // Use Asset ID or Post ID for filename
+              const filename = generateUniqueFilename(imageUrl, assetIdFromImg || postId, false);
               allMediaData.set(imageUrl, { url: imageUrl, filename, isVideo: false });
-              console.log(`Collected image (target HQ): ${imageUrl}`);
+              console.log(`[DEBUG] Successfully collected image for download: ${imageUrl}`);
+            } else {
+              console.log(`[DEBUG] Image URL already in collection: ${imageUrl}`);
             }
+          } else if (imageUrl) {
+            console.log(`[DEBUG] Image URL rejected by isValidUrl: ${imageUrl}`);
           }
         }
       }
