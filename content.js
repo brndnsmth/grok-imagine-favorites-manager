@@ -1045,12 +1045,23 @@ async function scrollAndCollectMedia(type) {
           if (assetIdFromImg || postId) {
             // Priority: Assets with UUID can target the High-Quality bucket
             const targetId = assetIdFromImg || postId;
-            const hqUrl = `https://imagine-public.x.ai/imagine-public/images/${targetId}.jpg?cache=1&dl=1`;
             
-            // Re-evaluating: Don't skip preview_image if we can try HQ. 
-            // If the user wants the image, we should try to provide the best version.
-            imageUrl = hqUrl;
-            console.log(`[DEBUG] Target set to High-Quality Image candidate: ${imageUrl}`);
+            // THE CRITICAL FIX:
+            // If the image ID is the SAME as the video ID, it's just a thumbnail generated for the video.
+            // These DO NOT exist in the imagine-public.x.ai (HQ) bucket.
+            // Trying to download them results in 404.
+            const isVideoThumb = hasVideoInCard && (targetId === videoId) && originalUrl.includes('preview_image');
+            
+            if (isVideoThumb) {
+               // Use the original preview URL which actually exists
+               imageUrl = originalUrl;
+               console.log(`[DEBUG] Video thumbnail detected (ID match: ${targetId}). Using original URL to avoid 404: ${imageUrl}`);
+            } else {
+               // It's either a standalone image or a shared card with a DIFFERENT image ID.
+               // In these cases, we try the High-Quality version.
+               imageUrl = `https://imagine-public.x.ai/imagine-public/images/${targetId}.jpg?cache=1&dl=1`;
+               console.log(`[DEBUG] Target set to High-Quality Image candidate: ${imageUrl}`);
+            }
           }
 
           if (imageUrl && isValidUrl(imageUrl, URL_PATTERNS.IMAGE)) {
