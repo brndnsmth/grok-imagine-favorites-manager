@@ -4,6 +4,15 @@
 
 console.log('[GrokManager] Content script initialized.');
 
+// Initialize simple modules map for debugging if needed
+window.GrokModules = {
+  Scanner: window.MediaScanner,
+  Classifier: window.ItemClassifier,
+  Api: window.Api,
+  UI: window.ProgressModal,
+  Utils: window.Utils
+};
+
 /**
  * Message listener for actions from popup
  */
@@ -11,7 +20,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   const { action } = request;
 
   if (action === 'ping') {
-    sendResponse({ loaded: true });
+    // Basic connectivity check
+    if (window.ProgressModal) {
+        sendResponse({ loaded: true });
+    } else {
+        // Retry logic often handles this, but good to be explicit
+        sendResponse({ loaded: false });
+    }
     return true;
   }
 
@@ -27,14 +42,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     try {
       chrome.storage.local.set({ activeOperation: true });
 
-      if (action === 'upscaleVideos') {
-        // Placeholder or future implementation
-        console.log('[GrokManager] Upscale requested (not yet implemented)');
-      } else if (action.startsWith('save')) {
+      if (action.startsWith('save')) {
         await handleSaveFlow(action);
       } else if (action === 'unsaveAll') {
-        // Placeholder or future implementation
-        console.log('[GrokManager] Unsave requested (not yet implemented)');
+        await handleUnsaveFlow();
       }
     } catch (error) {
       console.error('[GrokManager] Error handling action:', error);
@@ -46,6 +57,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.storage.local.set({ activeOperation: false });
     }
   })();
+  
+  // Return true to indicate async response (though we handled it inside async IIFE)
+  return true; 
 });
 
 /**
@@ -71,11 +85,51 @@ async function handleSaveFlow(type) {
     window.Api.startDownloads(mediaList);
     
   } catch (error) {
+    if (error.message === 'Operation cancelled by user') {
+        window.ProgressModal.hide();
+        return;
+    }
     console.error('[GrokManager] Save flow error:', error);
     throw error;
   } finally {
     if (window.ProgressModal) {
       setTimeout(() => window.ProgressModal.remove(), 2500);
+    }
+  }
+}
+
+/**
+ * High-level flow for unsaving all items
+ */
+async function handleUnsaveFlow() {
+  try {
+    if (!window.ProgressModal) {
+      throw new Error('UI Module not loaded. Please refresh the page.');
+    }
+    const confirmUnsave = confirm('WARNING: This will remove ALL likes/favorites from the current list.\n\nAre you sure you want to continue?');
+    if (!confirmUnsave) return;
+
+    window.ProgressModal.show('Unfavoriting All Items', 'Starting sweep...');
+    
+    // Delegate core work to MediaScanner
+    const processedCount = await window.MediaScanner.unsaveAll();
+
+    window.ProgressModal.update(100, `Done! Unfavorited ${processedCount} items.`);
+    
+    await window.Utils.sleep(1000);
+    alert(`Finished! ${processedCount} items were removed.\nThe page will now refresh.`);
+    window.location.reload();
+
+  } catch (error) {
+    if (error.message === 'Operation cancelled by user') {
+        window.ProgressModal.hide();
+        return;
+    }
+    console.error('[GrokManager] Unsave flow error:', error);
+    throw error;
+  } finally {
+    if (window.ProgressModal) {
+      window.ProgressModal.remove();
     }
   }
 }
