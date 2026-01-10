@@ -24,7 +24,7 @@ var ItemClassifier = {
     const classification = isStrictlyImage ? this.TYPES.STATIC_IMAGE : this.TYPES.VIDEO_COMPLEX;
 
     // Detailed diagnostic logging (one-to-one with card, no duplicates)
-    console.log(`[Classifier] Card #${index} | Type: ${classification} | Reasons: img=${!!img}, vid=${!!video}, play=${!!playIcon}, dur=${!!hasDuration}`);
+    // Detailed diagnostic logging (removed for production)
 
     return {
       type: classification,

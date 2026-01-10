@@ -8,7 +8,7 @@ var MediaScanner = {
    * Returns a list of media objects {url, filename}
    */
   async scan(type) {
-    console.log(`[Scanner] Target mode: ${type}`);
+
     
     let scrollContainer = document.documentElement;
     const possibleContainers = [ document.querySelector('main'), document.querySelector('.overflow-y-auto') ]
@@ -65,7 +65,7 @@ var MediaScanner = {
     }
 
     // Phase 2: Deep Analysis for Complex Items
-    console.log(`[Scanner] Starting deep analysis for ${complexPostsToAnalyze.length} items...`);
+    // Phase 2: Deep Analysis for Complex Items
     
     for (let i = 0; i < complexPostsToAnalyze.length; i++) {
       if (window.ProgressModal.isCancelled()) break;
