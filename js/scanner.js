@@ -74,6 +74,7 @@ var MediaScanner = {
 
     // Phase 2: Deep Analysis for Complex Items
     // Phase 2: Deep Analysis for Complex Items
+    console.log(`[Scanner] Phase 2 start. Processing ${complexPostsToAnalyze.length} complex items.`);
     
     for (let i = 0; i < complexPostsToAnalyze.length; i++) {
       if (window.ProgressModal.isCancelled()) break;
@@ -98,6 +99,7 @@ var MediaScanner = {
       } catch (e) {
         console.error(`[Scanner] ❌ Analysis failed for ${id}:`, e);
       }
+      console.log(`[Scanner] Finished processing item ${i+1}/${complexPostsToAnalyze.length}`);
       
       await window.Utils.sleep(window.CONFIG.ANALYSIS_DELAY_MS);
     }
