@@ -495,24 +495,30 @@ async function scrollAndCollectPostIds(filterFn) {
 
   // First, collect ALL item data while scrolling (don't filter yet)
   const allItemsData = new Map(); // Map of postId -> { hasVideo, hasImage }
-  let unchangedScrollCount = 0;
-  const maxUnchangedScrollAttempts = 3; // If scroll height doesn't change 3 times, we're at the bottom
+  let unchangedItemCount = 0;
+  let previousItemCount = 0;
+  const maxUnchangedAttempts = 10; // More attempts for large collections with virtual scrolling
 
   // Scroll to top first to ensure we capture everything
   console.log('Scrolling to top before collection...');
   scrollContainer.scrollTop = 0;
   await new Promise(resolve => setTimeout(resolve, 1000));
 
-  // Initialize previousScrollHeight AFTER scrolling to top and waiting
-  let previousScrollHeight = scrollContainer.scrollHeight;
-  console.log(`Initial scroll height: ${previousScrollHeight}`);
+  // Get total scroll height for progress calculation
+  let totalScrollHeight = scrollContainer.scrollHeight;
+  console.log(`Initial scroll height: ${totalScrollHeight}`);
 
   // Get viewport height for relative scrolling
   const viewportHeight = window.innerHeight;
-  const scrollIncrement = Math.floor(viewportHeight / 2); // Scroll by HALF viewport to avoid skipping items
+  const scrollIncrement = Math.floor(viewportHeight * 0.4); // Scroll by 40% of viewport
   console.log(`Viewport height: ${viewportHeight}px, Scroll increment: ${scrollIncrement}px`);
 
-  while (unchangedScrollCount < maxUnchangedScrollAttempts) {
+  // Track if we've reached the actual bottom
+  let reachedBottom = false;
+  let bottomReachCount = 0;
+  const maxBottomAttempts = 5;
+
+  while (!reachedBottom || unchangedItemCount < maxUnchangedAttempts) {
     // Check for cancellation
     if (ProgressModal.isCancelled()) {
       console.log('Collection cancelled by user');
@@ -568,8 +574,12 @@ async function scrollAndCollectPostIds(filterFn) {
       }
     });
 
+    const currentItemCount = allItemsData.size;
+    const currentScrollTop = scrollContainer.scrollTop;
     const currentScrollHeight = scrollContainer.scrollHeight;
-    console.log(`Current cards: ${cards.length}, Videos in view: ${videosInBatch}, Images in view: ${imagesInBatch}, Total collected: ${allItemsData.size}, ScrollHeight: ${currentScrollHeight}`);
+    const maxScrollTop = currentScrollHeight - scrollContainer.clientHeight;
+    
+    console.log(`Cards in DOM: ${cards.length}, Videos in view: ${videosInBatch}, Images in view: ${imagesInBatch}, Total collected: ${currentItemCount}, ScrollTop: ${currentScrollTop}/${maxScrollTop}`);
 
     // Log a sample of what we're detecting
     if (allItemsData.size <= 10) {
@@ -580,27 +590,48 @@ async function scrollAndCollectPostIds(filterFn) {
       })));
     }
 
-    // Check if scroll height has changed (means more content loaded)
-    if (currentScrollHeight === previousScrollHeight) {
-      unchangedScrollCount++;
-      console.log(`Scroll height unchanged (${unchangedScrollCount}/${maxUnchangedScrollAttempts})`);
+    // Check if we found new items
+    if (currentItemCount === previousItemCount) {
+      unchangedItemCount++;
+      console.log(`No new items found (${unchangedItemCount}/${maxUnchangedAttempts})`);
     } else {
-      unchangedScrollCount = 0;
-      previousScrollHeight = currentScrollHeight;
-      console.log(`Scroll height increased, continuing...`);
+      unchangedItemCount = 0;
+      previousItemCount = currentItemCount;
+      console.log(`Found new items! Total: ${currentItemCount}`);
     }
 
-    const scrollProgress = Math.min(80, (scrollContainer.scrollTop / currentScrollHeight) * 80);
-    ProgressModal.update(scrollProgress, `Collecting items... Found ${allItemsData.size} so far`);
+    // Check if we've reached the bottom of the scrollable area
+    const isAtBottom = currentScrollTop >= maxScrollTop - 100; // 100px tolerance
+    if (isAtBottom) {
+      bottomReachCount++;
+      console.log(`At bottom of scroll (${bottomReachCount}/${maxBottomAttempts})`);
+      if (bottomReachCount >= maxBottomAttempts && unchangedItemCount >= 3) {
+        reachedBottom = true;
+        console.log('Confirmed at bottom - no more content to load');
+      }
+    } else {
+      bottomReachCount = 0;
+    }
 
-    // Scroll down by HALF viewport height to avoid skipping items in virtual scroll
-    const currentScroll = scrollContainer.scrollTop;
-    const newScroll = currentScroll + scrollIncrement;
+    const scrollProgress = Math.min(80, (currentScrollTop / Math.max(1, maxScrollTop)) * 80);
+    ProgressModal.update(scrollProgress, `Collecting items... Found ${currentItemCount} so far`);
+
+    // If we've been at the bottom with no new content for a while, stop
+    if (reachedBottom && unchangedItemCount >= maxUnchangedAttempts) {
+      console.log('Stopping: reached bottom and no new items found');
+      break;
+    }
+
+    // Scroll down
+    const newScroll = currentScrollTop + scrollIncrement;
     scrollContainer.scrollTop = newScroll;
-    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    console.log(`Scrolled from ${currentScrollTop} to ${scrollContainer.scrollTop}`);
+
+    // Update total scroll height (it may grow as content loads)
+    totalScrollHeight = currentScrollHeight;
 
     // Wait for content to load
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 
   // Now filter the collected items based on the filter function
@@ -656,7 +687,7 @@ async function scrollToLoadAll() {
 
   let lastUniqueCount = 0;
   let unchangedCount = 0;
-  const maxUnchangedAttempts = 5;
+  const maxUnchangedAttempts = 10; // More attempts for large collections
   const seenCards = new Set();
 
   // Scroll to top first to ensure we capture everything
@@ -666,10 +697,15 @@ async function scrollToLoadAll() {
 
   // Get viewport height for relative scrolling
   const viewportHeight = window.innerHeight;
-  const scrollIncrement = Math.floor(viewportHeight / 2); // Scroll by HALF viewport to avoid skipping items
+  const scrollIncrement = Math.floor(viewportHeight * 0.4); // Scroll by 40% of viewport
   console.log(`Viewport height: ${viewportHeight}px, Scroll increment: ${scrollIncrement}px`);
 
-  while (unchangedCount < maxUnchangedAttempts) {
+  // Track if we've reached the actual bottom
+  let reachedBottom = false;
+  let bottomReachCount = 0;
+  const maxBottomAttempts = 5;
+
+  while (!reachedBottom || unchangedCount < maxUnchangedAttempts) {
     // Track unique cards (use image src as identifier to handle virtual scrolling)
     const cards = document.querySelectorAll(SELECTORS.CARD);
     cards.forEach(card => {
@@ -679,18 +715,18 @@ async function scrollToLoadAll() {
       }
     });
 
-    const currentCardCount = cards.length;
     const totalUnique = seenCards.size;
-    console.log(`Current cards in DOM: ${currentCardCount}, Total unique seen: ${totalUnique}, Last unique: ${lastUniqueCount}`);
+    const currentScrollTop = scrollContainer.scrollTop;
+    const currentScrollHeight = scrollContainer.scrollHeight;
+    const maxScrollTop = currentScrollHeight - scrollContainer.clientHeight;
+    
+    console.log(`Cards in DOM: ${cards.length}, Total unique seen: ${totalUnique}, ScrollTop: ${currentScrollTop}/${maxScrollTop}`);
 
     // Check for cancellation
     if (ProgressModal.isCancelled()) {
       console.log('Scroll loading cancelled by user');
       throw new Error('Operation cancelled by user');
     }
-
-    const scrollProgress = Math.min(80, (unchangedCount / maxUnchangedAttempts) * 80);
-    ProgressModal.update(scrollProgress, `Loading favorites... Found ${totalUnique} items so far`);
 
     if (totalUnique === lastUniqueCount) {
       unchangedCount++;
@@ -701,11 +737,32 @@ async function scrollToLoadAll() {
       console.log(`New unique items found! Total: ${totalUnique}`);
     }
 
-    // Scroll down by HALF viewport height to avoid skipping items in virtual scroll
-    const currentScroll = scrollContainer.scrollTop;
-    const newScroll = currentScroll + scrollIncrement;
+    // Check if we've reached the bottom of the scrollable area
+    const isAtBottom = currentScrollTop >= maxScrollTop - 100; // 100px tolerance
+    if (isAtBottom) {
+      bottomReachCount++;
+      console.log(`At bottom of scroll (${bottomReachCount}/${maxBottomAttempts})`);
+      if (bottomReachCount >= maxBottomAttempts && unchangedCount >= 3) {
+        reachedBottom = true;
+        console.log('Confirmed at bottom - no more content to load');
+      }
+    } else {
+      bottomReachCount = 0;
+    }
+
+    const scrollProgress = Math.min(80, (currentScrollTop / Math.max(1, maxScrollTop)) * 80);
+    ProgressModal.update(scrollProgress, `Loading favorites... Found ${totalUnique} items so far`);
+
+    // If we've been at the bottom with no new content for a while, stop
+    if (reachedBottom && unchangedCount >= maxUnchangedAttempts) {
+      console.log('Stopping: reached bottom and no new items found');
+      break;
+    }
+
+    // Scroll down
+    const newScroll = currentScrollTop + scrollIncrement;
     scrollContainer.scrollTop = newScroll;
-    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    console.log(`Scrolled from ${currentScrollTop} to ${scrollContainer.scrollTop}`);
 
     // Wait for content to load
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -752,23 +809,29 @@ async function scrollAndCollectVideosForUpscale() {
   // First pass: collect all video URLs and IDs while scrolling
   const videoData = new Map(); // Map of videoId -> video URL
   const seenUrls = new Set();
-  let unchangedScrollCount = 0;
-  const maxUnchangedScrollAttempts = 3; // If scroll height doesn't change 3 times, we're at the bottom
+  let unchangedVideoCount = 0;
+  let previousVideoCount = 0;
+  const maxUnchangedAttempts = 10; // More attempts for large collections with virtual scrolling
 
   // Scroll to top first to ensure we capture everything
   console.log('Scrolling to top before collection...');
   scrollContainer.scrollTop = 0;
   await new Promise(resolve => setTimeout(resolve, 1000));
 
-  // Initialize previousScrollHeight AFTER scrolling to top and waiting
-  let previousScrollHeight = scrollContainer.scrollHeight;
-  console.log(`Initial scroll height: ${previousScrollHeight}`);
+  // Get total scroll height for progress calculation
+  let totalScrollHeight = scrollContainer.scrollHeight;
+  console.log(`Initial scroll height: ${totalScrollHeight}`);
 
   const viewportHeight = window.innerHeight;
-  const scrollIncrement = Math.floor(viewportHeight / 2); // Scroll by HALF viewport to avoid skipping items
+  const scrollIncrement = Math.floor(viewportHeight * 0.4); // Scroll by 40% of viewport
   console.log(`Viewport height: ${viewportHeight}px, Scroll increment: ${scrollIncrement}px`);
 
-  while (unchangedScrollCount < maxUnchangedScrollAttempts) {
+  // Track if we've reached the actual bottom
+  let reachedBottom = false;
+  let bottomReachCount = 0;
+  const maxBottomAttempts = 5;
+
+  while (!reachedBottom || unchangedVideoCount < maxUnchangedAttempts) {
     // Check for cancellation
     if (ProgressModal.isCancelled()) {
       console.log('Collection cancelled by user');
@@ -792,32 +855,55 @@ async function scrollAndCollectVideosForUpscale() {
       }
     }
 
-    const currentCardCount = cards.length;
-    const currentUniqueCount = videoData.size;
+    const currentVideoCount = videoData.size;
+    const currentScrollTop = scrollContainer.scrollTop;
     const currentScrollHeight = scrollContainer.scrollHeight;
-    console.log(`Current cards: ${currentCardCount}, Videos found: ${currentUniqueCount}, ScrollHeight: ${currentScrollHeight}`);
+    const maxScrollTop = currentScrollHeight - scrollContainer.clientHeight;
+    
+    console.log(`Cards in DOM: ${cards.length}, Videos found: ${currentVideoCount}, ScrollTop: ${currentScrollTop}/${maxScrollTop}`);
 
-    // Check if scroll height has changed (means more content loaded)
-    if (currentScrollHeight === previousScrollHeight) {
-      unchangedScrollCount++;
-      console.log(`Scroll height unchanged (${unchangedScrollCount}/${maxUnchangedScrollAttempts})`);
+    // Check if we found new videos
+    if (currentVideoCount === previousVideoCount) {
+      unchangedVideoCount++;
+      console.log(`No new videos found (${unchangedVideoCount}/${maxUnchangedAttempts})`);
     } else {
-      unchangedScrollCount = 0;
-      previousScrollHeight = currentScrollHeight;
-      console.log(`Scroll height increased, continuing...`);
+      unchangedVideoCount = 0;
+      previousVideoCount = currentVideoCount;
+      console.log(`Found new videos! Total: ${currentVideoCount}`);
     }
 
-    const scrollProgress = Math.min(50, (scrollContainer.scrollTop / currentScrollHeight) * 50);
-    ProgressModal.update(scrollProgress, `Collecting videos... Found ${currentUniqueCount} so far`);
+    // Check if we've reached the bottom of the scrollable area
+    const isAtBottom = currentScrollTop >= maxScrollTop - 100; // 100px tolerance
+    if (isAtBottom) {
+      bottomReachCount++;
+      console.log(`At bottom of scroll (${bottomReachCount}/${maxBottomAttempts})`);
+      if (bottomReachCount >= maxBottomAttempts && unchangedVideoCount >= 3) {
+        reachedBottom = true;
+        console.log('Confirmed at bottom - no more content to load');
+      }
+    } else {
+      bottomReachCount = 0;
+    }
 
-    // Scroll down by HALF viewport height to avoid skipping items in virtual scroll
-    const currentScroll = scrollContainer.scrollTop;
-    const newScroll = currentScroll + scrollIncrement;
+    const scrollProgress = Math.min(50, (currentScrollTop / Math.max(1, maxScrollTop)) * 50);
+    ProgressModal.update(scrollProgress, `Collecting videos... Found ${currentVideoCount} so far`);
+
+    // If we've been at the bottom with no new content for a while, stop
+    if (reachedBottom && unchangedVideoCount >= maxUnchangedAttempts) {
+      console.log('Stopping: reached bottom and no new videos found');
+      break;
+    }
+
+    // Scroll down
+    const newScroll = currentScrollTop + scrollIncrement;
     scrollContainer.scrollTop = newScroll;
-    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    console.log(`Scrolled from ${currentScrollTop} to ${scrollContainer.scrollTop}`);
 
-    // Wait for content to load - increased for better reliability
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Update total scroll height (it may grow as content loads)
+    totalScrollHeight = currentScrollHeight;
+
+    // Wait for content to load
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 
   // Scroll back to top
@@ -896,24 +982,31 @@ async function scrollAndCollectMedia(type) {
 
   // First, collect ALL media data while scrolling (don't process yet)
   const allMediaData = new Map(); // Map of url -> { url, filename, isVideo, isHD }
-  let unchangedScrollCount = 0;
-  const maxUnchangedScrollAttempts = 3; // If scroll height doesn't change 3 times, we're at the bottom
+  let unchangedMediaCount = 0;
+  let previousMediaCount = 0;
+  const maxUnchangedAttempts = 10; // More attempts for large collections with virtual scrolling
 
   // Scroll to top first to ensure we capture everything
   console.log('Scrolling to top before collection...');
   scrollContainer.scrollTop = 0;
   await new Promise(resolve => setTimeout(resolve, 1000));
 
-  // Initialize previousScrollHeight AFTER scrolling to top and waiting
-  let previousScrollHeight = scrollContainer.scrollHeight;
-  console.log(`Initial scroll height: ${previousScrollHeight}`);
+  // Get total scroll height and viewport for progress calculation
+  let totalScrollHeight = scrollContainer.scrollHeight;
+  console.log(`Initial scroll height: ${totalScrollHeight}`);
 
   // Get viewport height for relative scrolling
   const viewportHeight = window.innerHeight;
-  const scrollIncrement = Math.floor(viewportHeight / 2); // Scroll by HALF viewport to avoid skipping items
+  // Use smaller scroll increments for better capture with virtual scrolling
+  const scrollIncrement = Math.floor(viewportHeight * 0.4); // Scroll by 40% of viewport
   console.log(`Viewport height: ${viewportHeight}px, Scroll increment: ${scrollIncrement}px`);
 
-  while (unchangedScrollCount < maxUnchangedScrollAttempts) {
+  // Track if we've reached the actual bottom
+  let reachedBottom = false;
+  let bottomReachCount = 0;
+  const maxBottomAttempts = 5;
+
+  while (!reachedBottom || unchangedMediaCount < maxUnchangedAttempts) {
     // Check for cancellation
     if (ProgressModal.isCancelled()) {
       console.log('Scroll and collect cancelled by user');
@@ -967,30 +1060,56 @@ async function scrollAndCollectMedia(type) {
       }
     }
 
+    const currentMediaCount = allMediaData.size;
+    const currentScrollTop = scrollContainer.scrollTop;
     const currentScrollHeight = scrollContainer.scrollHeight;
-    console.log(`Current cards: ${cards.length}, Total media collected: ${allMediaData.size}, ScrollHeight: ${currentScrollHeight}`);
+    const maxScrollTop = currentScrollHeight - scrollContainer.clientHeight;
+    
+    console.log(`Cards in DOM: ${cards.length}, Total media collected: ${currentMediaCount}, ScrollTop: ${currentScrollTop}/${maxScrollTop}`);
 
-    // Check if scroll height has changed (means more content loaded)
-    if (currentScrollHeight === previousScrollHeight) {
-      unchangedScrollCount++;
-      console.log(`Scroll height unchanged (${unchangedScrollCount}/${maxUnchangedScrollAttempts})`);
+    // Check if we found new media
+    if (currentMediaCount === previousMediaCount) {
+      unchangedMediaCount++;
+      console.log(`No new media found (${unchangedMediaCount}/${maxUnchangedAttempts})`);
     } else {
-      unchangedScrollCount = 0;
-      previousScrollHeight = currentScrollHeight;
-      console.log(`Scroll height increased, continuing...`);
+      unchangedMediaCount = 0;
+      previousMediaCount = currentMediaCount;
+      console.log(`Found ${currentMediaCount - previousMediaCount} new items! Total: ${currentMediaCount}`);
     }
 
-    const scrollProgress = Math.min(60, (scrollContainer.scrollTop / currentScrollHeight) * 60);
-    ProgressModal.update(scrollProgress, `Collecting media... Found ${allMediaData.size} items so far`);
+    // Check if we've reached the bottom of the scrollable area
+    const isAtBottom = currentScrollTop >= maxScrollTop - 100; // 100px tolerance
+    if (isAtBottom) {
+      bottomReachCount++;
+      console.log(`At bottom of scroll (${bottomReachCount}/${maxBottomAttempts})`);
+      if (bottomReachCount >= maxBottomAttempts && unchangedMediaCount >= 3) {
+        reachedBottom = true;
+        console.log('Confirmed at bottom - no more content to load');
+      }
+    } else {
+      bottomReachCount = 0;
+    }
 
-    // Scroll down by HALF viewport height to avoid skipping items in virtual scroll
-    const currentScroll = scrollContainer.scrollTop;
-    const newScroll = currentScroll + scrollIncrement;
+    // Update progress based on scroll position and media count
+    const scrollProgress = Math.min(60, (currentScrollTop / Math.max(1, maxScrollTop)) * 60);
+    ProgressModal.update(scrollProgress, `Collecting media... Found ${currentMediaCount} items so far`);
+
+    // If we've been at the bottom with no new content for a while, stop
+    if (reachedBottom && unchangedMediaCount >= maxUnchangedAttempts) {
+      console.log('Stopping: reached bottom and no new media found');
+      break;
+    }
+
+    // Scroll down
+    const newScroll = currentScrollTop + scrollIncrement;
     scrollContainer.scrollTop = newScroll;
-    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    console.log(`Scrolled from ${currentScrollTop} to ${scrollContainer.scrollTop}`);
 
-    // Wait for content to load
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Update total scroll height (it may grow as content loads)
+    totalScrollHeight = scrollContainer.scrollHeight;
+
+    // Wait for content to load - longer wait to ensure virtual scroll updates
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 
   // Now filter and process the collected media based on type
