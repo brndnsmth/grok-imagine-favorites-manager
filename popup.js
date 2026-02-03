@@ -98,7 +98,15 @@ function sendAction(action) {
         try {
           await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            files: ['content.js']
+            files: [
+              'js/constants.js',
+              'js/utils.js',
+              'js/ui.js',
+              'js/classifier.js',
+              'js/api.js',
+              'js/scanner.js',
+              'content.js'
+            ]
           });
           
           // Wait a moment for script to initialize
@@ -207,10 +215,14 @@ function updateProgress() {
     
     if (total > 0) {
       progressElement.style.display = 'block';
-      progressText.textContent = `${completed} of ${total} downloads complete`;
+      const statusValues = Object.values(progress);
+      const completed = statusValues.filter(s => s === 'complete').length;
+      const failed = statusValues.filter(s => s === 'failed').length;
       
-      // Clear progress after all complete
-      if (completed === total) {
+      progressText.textContent = `${completed} complete${failed > 0 ? `, ${failed} failed` : ''} of ${total}`;
+      
+      // Clear progress after all (including failures) are finished
+      if (completed + failed === total) {
         setTimeout(() => {
           chrome.storage.local.remove(['totalDownloads', 'downloadProgress']);
           progressElement.style.display = 'none';
