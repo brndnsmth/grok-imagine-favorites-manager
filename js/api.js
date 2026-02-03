@@ -9,7 +9,8 @@ var Api = {
    */
   endpoints: {
     analysis: 'https://grok.com/rest/app-chat/conversations',
-    unlike: 'https://grok.com/rest/media/post/unlike'
+    unlike: 'https://grok.com/rest/media/post/unlike',
+    upscale: 'https://grok.com/rest/media/video/upscale'
   },
 
   /**
@@ -29,6 +30,24 @@ var Api = {
         }
       });
     });
+  },
+
+  /**
+   * Request video upscale
+   */
+  async requestUpscale(videoId) {
+    try {
+      const response = await fetch(this.endpoints.upscale, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ videoId })
+      });
+      return response.ok;
+    } catch (e) {
+      console.error('[Api] Upscale Failed:', e);
+      return false;
+    }
   },
 
   /**

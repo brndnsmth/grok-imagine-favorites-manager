@@ -120,15 +120,24 @@ Files are saved to your default Chrome downloads folder in a `grok-imagine/` sub
 
 Videos are automatically named to match their corresponding image files (using the image UUID/filename).
 
-## Technical Details
+## Technical Details & Credits
+
+### Recent Improvements
+
+Special thanks to **[masamunet](https://github.com/masamunet)** for significant core contributions:
+
+* **"Universal Sweep" Logic:** Overhauled the unfavorite system to fix issues where video items were skipped. The logic now uses a two-pronged approach: a physical click on the "Unsave" button followed by a sequential API backup for 100% reliability.
+* **Deep ID Extraction:** Implemented `findAllUUIDsInElement` to scan all attributes for Post IDs. This ensures the original Post ID is captured even when the video UUID differs (common with regenerated videos).
+* **Sequential Processing:** Shifted from "batch" processing to an `await` flow to prevent race conditions and ensure every item is processed before moving to the next.
+* **Reliable High-Quality Downloads:** Fixed logic to ensure "Images Only" and "Videos Only" filters work strictly as intended without mixed content, while always grabbing the highest resolution available.
+
+### System details
 
 - Downloads are rate-limited to approximately 3 per second to avoid browser issues
 - Unfavorite requests are delayed by 150ms between calls
 - Upscale requests are staggered with 300ms delays and run in parallel
 - Progress tracking displays in an on-screen modal with visual progress bar
 - Content script automatically scrolls to load all lazy-loaded content
-- Virtual scrolling is handled by collecting items during scroll process
-- Operations support cancellation at any point
 
 ## Important Notes
 
@@ -141,16 +150,6 @@ Videos are automatically named to match their corresponding image files (using t
 - Progress is shown in an on-screen modal with cancellation option
 - Unfavorite operations work by calling `/rest/media/post/unlike` with the post id
 - Upscale requests are sent to `/rest/media/video/upscale` and complete in the background
-- Refresh the page after a few minutes to see newly upscaled HD videos
-- Check browser console (F12) for detailed logs during operations
-
-## Progress Tracking
-
-The extension shows a gradient progress modal on the page with:
-- Operation name and current status
-- Visual progress bar
-- Real-time count of processed items
-- Cancel button to stop the operation
 
 ## Support
 
